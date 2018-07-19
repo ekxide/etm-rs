@@ -1,0 +1,6 @@
+[package]
+name = "messaging"
+version = "0.1.0"
+authors = ["Mathias Kraus <mathias.kraus@bobedibob.de>"]
+
+[dependencies]
