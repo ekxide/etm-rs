@@ -1,9 +1,13 @@
+/*
+ * Copyright (C) 2018 Mathias Kraus <k.hias@gmx.de> - All Rights Reserved
+ *
+ * Unauthorized copying of this file, via any medium is strictly prohibited
+ * Proprietary and confidential
+ */
+
 use std::io::prelude::*;
 use std::net::{TcpStream, Ipv4Addr, Shutdown};
 use std::time;
-//just for debug start
-use std::thread;
-//just for debug stop
 
 pub struct Connection {
     id: i32,
@@ -70,9 +74,8 @@ impl Connection {
     }
 }
 
-pub fn open_connection(connection_id : i32) -> Option<Box<Connection>> {
+pub fn open_connection(ip: Ipv4Addr, connection_id : i32) -> Option<Box<Connection>> {
     // request communication port
-    let ip = Ipv4Addr::new(127, 0, 0, 1);
     match TcpStream::connect((ip, 0xC390)) {
         Ok(mut stream) => {
             // set read timeout
@@ -88,11 +91,6 @@ pub fn open_connection(connection_id : i32) -> Option<Box<Connection>> {
                     let ip = Ipv4Addr::new(127, 0, 0, 1);
                     let port = (buffer[0] as u16) << 8 | (buffer[1] as u16);
                     println!("client::assigned port::{}", port);
-                    
-                    //just for debug start
-                    let sleeptime = time::Duration::from_millis(200);
-                    thread::sleep(sleeptime);
-                    //just for debug end
                     
                     match TcpStream::connect((ip, port)) {
                         Ok(stream) => {

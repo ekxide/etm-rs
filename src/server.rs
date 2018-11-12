@@ -47,9 +47,8 @@ impl <T: MessageProcessing> Server<T> {
     pub fn run(&self) {
         println!("server::run");
         
-        let ip = Ipv4Addr::new(127, 0, 0, 1);
-//         let port = 0xC390u16;
-        
+        let ip = Ipv4Addr::UNSPECIFIED;
+
         // bind port
         let listener = self.bind(ip, self.port).unwrap();
         
@@ -82,6 +81,7 @@ impl <T: MessageProcessing> Server<T> {
     fn handle_connection_request(&self, mut stream: TcpStream) -> io::Result<()> {
         // get listener
         let remote_ip = stream.peer_addr()?.ip();
+        println!("remote ip: {:?}", remote_ip);
         let listener = TcpListener::bind((remote_ip, 0))?;
         let local_port = listener.local_addr()?.port();
         let data : [u8; 2] = [(local_port >> 8) as u8, local_port as u8];
