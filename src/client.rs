@@ -17,7 +17,7 @@ pub struct Connection {
 
 impl Connection {
     pub fn send_receive(&mut self, data_send: Vec<u8>) -> Vec<u8> {
-        if let Some(ref mut stream) = self.stream {
+        if let Some(stream) = self.stream.as_mut() {
 //             println!("client::write data");
             
             
@@ -40,7 +40,7 @@ impl Connection {
         let bytes_to_read : u64;
         let mut databuffer = vec![];
         
-        if let Some(ref mut stream) = self.stream {
+        if let Some(stream) = self.stream.as_mut() {
             // clear databuffer
             //databuffer.drain(..);
             // read data length
@@ -64,7 +64,7 @@ impl Connection {
     }
     
     pub fn close(&mut self) {
-        if let Some(ref mut stream) = self.stream {
+        if let Some(stream) = self.stream.as_mut() {
             println!("client::shutdown stream");
             stream.shutdown(Shutdown::Both);
         } else {
