@@ -88,7 +88,6 @@ pub fn open_connection(ip: Ipv4Addr, connection_id : i32) -> Option<Box<Connecti
                 Err(err)  => {println!("client::error::timeout while waiting for communication port::{:?}", err); None},
                 Ok(_)     => {
                     // open communication port
-                    let ip = Ipv4Addr::new(127, 0, 0, 1);
                     let port = (buffer[0] as u16) << 8 | (buffer[1] as u16);
                     println!("client::assigned port::{}", port);
                     
