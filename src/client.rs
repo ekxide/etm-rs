@@ -30,7 +30,7 @@ impl Connection {
                     Err(err)  => {println!("client::error::timeout while waiting for communication port::{:?}", err); None},
                     Ok(_)     => {
                         // open communication port
-                        let port = (buffer[0] as u16) << 8 | (buffer[1] as u16);
+                        let port = u16::from_be_bytes(buffer);
                         println!("client::assigned port::{}", port);
 
                         match TcpStream::connect((ip, port)) {
@@ -52,16 +52,9 @@ impl Connection {
         if let Some(stream) = self.stream.as_mut() {
 //             println!("client::write data");
 
-
-            let data_send_length = data_send.len();
-            let mut senddata: Vec<u8> = vec![0; 4];
-            senddata[0] = (data_send_length >> 24) as u8;
-            senddata[1] = (data_send_length >> 16) as u8;
-            senddata[2] = (data_send_length >> 8)  as u8;
-            senddata[3] =  data_send_length        as u8;
+            let mut senddata = (data_send.len() as u32).to_be_bytes().to_vec();
 
             senddata.extend(data_send);
-
 
             stream.write(&senddata);
         } else {
@@ -69,7 +62,6 @@ impl Connection {
         }
 
         let mut datalengthbuffer = [0u8; 4];
-        let bytes_to_read : u64;
         let mut databuffer = vec![];
 
         if let Some(stream) = self.stream.as_mut() {
@@ -79,7 +71,7 @@ impl Connection {
             match stream.read_exact(&mut datalengthbuffer[..]) {
                 Err(_)  => {println!("client::error::reading buffer");},
                 Ok(_) => {
-                    bytes_to_read = (datalengthbuffer[0] as u64) << 24 | (datalengthbuffer[1] as u64) << 16 | (datalengthbuffer[2] as u64) << 8 | (datalengthbuffer[3] as u64);
+                    let bytes_to_read = u32::from_be_bytes(datalengthbuffer) as u64;
                     let mut data = stream.take(bytes_to_read);
                     match data.read_to_end(&mut databuffer) {
                         Ok(n) => assert_eq!(bytes_to_read as usize, n),

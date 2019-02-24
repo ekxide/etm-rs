@@ -81,8 +81,8 @@ impl <T: MessageProcessing> Server<T> {
     fn handle_connection_request(&self, mut stream: TcpStream) -> io::Result<()> {
         // get listener
         let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0))?;
-        let local_port = listener.local_addr()?.port();
-        let data : [u8; 2] = [(local_port >> 8) as u8, local_port as u8];
+        let local_port: u16 = listener.local_addr()?.port();
+        let data = local_port.to_be_bytes();
         
         // set write timeout
         stream.set_write_timeout(Some(time::Duration::from_secs(1)))?;
@@ -115,7 +115,6 @@ impl <T: MessageProcessing> Server<T> {
 
         // read the length
         let mut datalengthbuffer = [0u8; 4];
-        let mut bytes_to_read : usize;
         
         T::setup("TODO: this is the connection info with ip address and port".to_string(), 13);
         
@@ -126,9 +125,9 @@ impl <T: MessageProcessing> Server<T> {
                 Err(_)  => {println!("server::error::reading buffer"); break;},
                 Ok(_) => {
 //                     println!("{:?}", datalengthbuffer);
-                    bytes_to_read = (datalengthbuffer[0] as usize) << 24 | (datalengthbuffer[1] as usize) << 16 | (datalengthbuffer[2] as usize) << 8 | (datalengthbuffer[3] as usize);
+                    let bytes_to_read = u32::from_be_bytes(datalengthbuffer) as u64;
                     
-                    match stream.take(bytes_to_read as u64).read_to_end(&mut databuffer) {
+                    match stream.take(bytes_to_read).read_to_end(&mut databuffer) {
                         Ok(n) => assert_eq!(bytes_to_read as usize, n),
                         _ => panic!("server::didn't read enough"),
                     }
@@ -136,17 +135,12 @@ impl <T: MessageProcessing> Server<T> {
 //                     println!("server::bytes read: {}", bytes_to_read);
                     
                     let response = T::cmd_handler(/*connection_id*/42, databuffer);
-                    let response_length = response.len();
-                    let mut senddata: Vec<u8> = vec![0; 4];
-                    senddata[0] = (response_length >> 24) as u8;
-                    senddata[1] = (response_length >> 16) as u8;
-                    senddata[2] = (response_length >> 8)  as u8;
-                    senddata[3] =  response_length        as u8;
-                    
+                    let mut senddata = (response.len() as u32).to_be_bytes().to_vec();
                     senddata.extend(response);
                     
-                    let _ = stream.write(&senddata);    //ignore write error
-                    
+                    if let Err(err) = stream.write(&senddata) {
+                        println!("{:?}", err);
+                    }
                 },
             };
             
