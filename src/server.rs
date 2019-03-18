@@ -11,35 +11,36 @@ use std::io::{Error, ErrorKind};
 use std::marker::PhantomData;
 use std::net::{TcpListener, TcpStream, Ipv4Addr};
 use std::{thread, time};
+use std::sync::{Arc, Mutex};
 
 // TODO: use error_chain
 
 pub trait MessageProcessing {
-    fn setup(connection_info: String, connection_id: u32) -> () {
+    fn new() -> Box<Self>;
+
+    fn setup(&mut self, connection_info: String, connection_id: u32) -> () {
         // default implementation das nothing
         println!("default implementation for MessageProcessing::setup");
     }
     
-    fn cmd_handler(connection_id: u32, cmd: Vec<u8>) -> Vec<u8>;
+    fn cmd_handler(&mut self, connection_id: u32, cmd: Vec<u8>) -> Vec<u8>;
     
-    fn cleanup(connection_info: String, connection_id: u32) -> () {
+    fn cleanup(&mut self, connection_info: String, connection_id: u32) -> () {
         // default implementation das nothing
         println!("default implementation for MessageProcessing::cleanup");
     }
 }
 
-pub struct Server<T: MessageProcessing> {
-    message_processing: PhantomData<T>,
+pub struct Server<T: 'static + MessageProcessing + Send> {
+    message_processing: Arc<Mutex<Box<T>>>,
     port: u16,
 }
 
-unsafe impl <T: MessageProcessing> Sync for Server<T> {}
+impl <T: 'static + MessageProcessing + Send> Server<T> {
 
-impl <T: MessageProcessing> Server<T> {
-
-    pub fn new(port: u16) -> Server<T> {
+    pub fn new(port: u16) -> Self {
         Server {
-            message_processing: PhantomData,
+            message_processing: Arc::new(Mutex::new(T::new())),
             port,
         }
     }
@@ -89,12 +90,13 @@ impl <T: MessageProcessing> Server<T> {
         stream.write(&data)?;
         
         // start the server connection connection handler
-        thread::spawn(move || {Server::<T>::transmission_handler(listener)});
+        let message_processing = self.message_processing.clone();
+        thread::spawn(move || {Server::<T>::transmission_handler(message_processing, listener)});
         // TODO: store threads in Vec and join them on drop
         Ok(())
     }
 
-    fn listener_accept_nonblocking(listener: TcpListener) -> io::Result<TcpStream> {
+    pub fn listener_accept_nonblocking(listener: TcpListener) -> io::Result<TcpStream> {
         listener.set_nonblocking(true)?;    //we can not interrupt the accept call, therefore we have to set the listener to nonblocking and poll every 100ms accept
         for _ in 1..20 {
             match listener.accept() {
@@ -109,14 +111,14 @@ impl <T: MessageProcessing> Server<T> {
         err
     }
 
-    fn transmission_handler(listener: TcpListener) -> io::Result<()> {
+    fn transmission_handler(message_processing: Arc<Mutex<Box<T>>>, listener: TcpListener) -> io::Result<()> {
         let ref mut stream = Server::<T>::listener_accept_nonblocking(listener)?;
         stream.set_nodelay(true);
 
         // read the length
         let mut datalengthbuffer = [0u8; 4];
         
-        T::setup("TODO: this is the connection info with ip address and port".to_string(), 13);
+        message_processing.lock().unwrap().setup("TODO: this is the connection info with ip address and port".to_string(), 13);
         
         loop {
             let mut databuffer: Vec<u8> = vec![];
@@ -134,7 +136,7 @@ impl <T: MessageProcessing> Server<T> {
                     
 //                     println!("server::bytes read: {}", bytes_to_read);
                     
-                    let response = T::cmd_handler(/*connection_id*/42, databuffer);
+                    let response = message_processing.lock().unwrap().cmd_handler(/*connection_id*/42, databuffer);
                     let mut senddata = (response.len() as u32).to_be_bytes().to_vec();
                     senddata.extend(response);
                     
@@ -146,7 +148,7 @@ impl <T: MessageProcessing> Server<T> {
             
         }
         
-        T::cleanup("TODO: this is the connection info with ip address and port".to_string(), 13);
+        message_processing.lock().unwrap().cleanup("TODO: this is the connection info with ip address and port".to_string(), 13);
 
         println!("server::end transmission_handler");
         Ok(())
