@@ -23,7 +23,7 @@ pub trait MessageProcessing {
         println!("default implementation for MessageProcessing::setup");
     }
     
-    fn cmd_handler(&mut self, connection_id: u32, cmd: Vec<u8>) -> Vec<u8>;
+    fn execute(&mut self, connection_id: u32, cmd: Vec<u8>) -> Vec<u8>;
     
     fn cleanup(&mut self, connection_info: String, connection_id: u32) -> () {
         // default implementation das nothing
@@ -136,7 +136,7 @@ impl <T: 'static + MessageProcessing + Send> Server<T> {
                     
 //                     println!("server::bytes read: {}", bytes_to_read);
                     
-                    let response = message_processing.lock().unwrap().cmd_handler(/*connection_id*/42, databuffer);
+                    let response = message_processing.lock().unwrap().execute(/*s*/42, databuffer);
                     let mut senddata = (response.len() as u32).to_be_bytes().to_vec();
                     senddata.extend(response);
                     
