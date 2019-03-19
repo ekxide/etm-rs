@@ -5,7 +5,24 @@
  * Proprietary and confidential
  */
 
+use crate::Service;
+
 use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub struct ConnectionRequest {
+    pub protocol_version: u32,
+    pub connection_id: u32,         // -1 dynamic
+    pub max_cmd_interval_ms: u32,   // -1 infinite
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub struct ConnectionResponse {
+    pub protocol_version: u32,
+    pub port: u16,
+    pub connection_id: u32,         // requested or assigned connection id
+    pub service: Service,
+}
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct RPC<T> {

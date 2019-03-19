@@ -5,44 +5,79 @@
  * Proprietary and confidential
  */
 
-use crate::rpc::RPC;
+use crate::{ProtocolVersion, Service};
+use crate::rpc::{RPC, ConnectionRequest, ConnectionResponse};
+use crate::util;
 
 use serde::{Serialize, de::DeserializeOwned};
 
-use std::io::prelude::*;
 use std::net::{TcpStream, Ipv4Addr, Shutdown};
 use std::time;
 
 pub struct Connection {
-    id: i32,
+    id: u32,
     port: u16,
-    stream: Option<TcpStream>
+    stream: Option<TcpStream>,
+    server_protocol_version: u32,
+    server_service: Service,
 }
 
 impl Connection {
     pub fn new(ip: Ipv4Addr, connection_id : i32) -> Option<Box<Connection>> {
-        // request communication port
-        let connection = TcpStream::connect((ip, 0xC390)).and_then(|mut stream| {
+        let mut connection: Option<Box<Connection>> = None;
+        let mut stream: Option<TcpStream> = None;
+        //TODO the port should also be configurable from outside of ETM
+        TcpStream::connect((ip, 0xC390)).map(|stream_port| {
             let read_timeout = Some(time::Duration::from_secs(2));
-            stream.set_read_timeout(read_timeout).err().map(|err| println!("client::error::failed to set tcp timeout: {:?}", err));
+            stream_port.set_read_timeout(read_timeout).err().map(|err| println!("client::error::failed to set tcp timeout: {:?}", err));
+            stream = Some(stream_port);
+        }).err().map(|err| println!("client::error::failed to open tcp port: {:?}", err));
 
-            let mut buffer = [0u8; 2];
-            stream.read_exact(&mut buffer[..]).and_then(|_| {
-                let port = u16::from_be_bytes(buffer);
-                println!("client::assigned port::{}", port);
-                TcpStream::connect((ip, port)).and_then(|stream| {
-                    stream.set_nodelay(true).err().map(|err| println!("client::error::failed to set tcp nodelay: {:?}", err));
-                    Ok(Box::new(Connection{id: connection_id, port, stream: Some(stream)}))
-                })
-            })
-        });
+        let protocol_version = ProtocolVersion::entity().version();
+        let mut serde = bincode::config();
 
-        match connection {
-            Ok(connection) => {println!("client::connection established"); Some(connection)},
-            Err(err) => {println!("client::error::connection: {:?}", err); None},
+        let rpc = ConnectionRequest { protocol_version, connection_id: std::u32::MAX, max_cmd_interval_ms: std::u32::MAX };
+
+        let serialized = serde.big_endian().serialize(&rpc).unwrap();
+        let payload = Self::send_receive(&mut stream, serialized);
+
+        serde.big_endian().deserialize::<ConnectionResponse>(&payload).map(|response| {
+            println!("client::assigned port::{}", response.port);
+            TcpStream::connect((ip, response.port)).map(|stream| {
+                stream.set_nodelay(true).err().map(|err| println!("client::error::failed to set tcp nodelay: {:?}", err));
+                println!("connected to service: '{}'", response.service.id());
+                connection = Some(Box::new(Connection{id: response.connection_id,
+                                                      port: response.port,
+                                                      stream: Some(stream),
+                                                      server_protocol_version: response.protocol_version,
+                                                      server_service: response.service,
+                }));
+            }).err().map(|err| println!("client::error::failed to open communication port: {:?}", err));
+        }).err().map(|err| println!("client::error::deserialize response: {:?}", err));
+
+        connection
+    }
+
+    pub fn compatibility_check(&self, service: Service) -> bool {
+        let mut compatiblity = true;
+        let protocol_version = ProtocolVersion::entity().version();
+
+        if protocol_version != self.server_protocol_version {
+            compatiblity = false;
+            println!("incompatible ETM versions detected! client on v{} and server on v{}!", protocol_version, self.server_protocol_version);
         }
-        //TODO use map_or_else once feature is in stable rust
-        // connection.map_or_else(|err| { println!(""client::error::connection: {:?}", err); None }, |connection| { Some(connection) } )
+
+        if service.id() != self.server_service.id() {
+            compatiblity = false;
+            println!("incompatible Services detected! client expects '{}' and server supplies '{}'!", service.id(), self.server_service.id());
+        }
+
+        if service.protocol_version() != self.server_service.protocol_version() {
+            compatiblity = false;
+            println!("incompatible ETM versions detected! client on v{} and server on v{}!", service.protocol_version(), self.server_service.protocol_version());
+        }
+
+        compatiblity
     }
 
     pub fn transceive<Request: Serialize, Response: DeserializeOwned>(&mut self, request: Request) -> Option<Response> {
@@ -51,7 +86,7 @@ impl Connection {
         let rpc = RPC { transmission_id: 42, data: request };
         let rpc = serde.big_endian().serialize(&rpc).unwrap();
 
-        let rpc = self.send_receive(rpc);
+        let rpc = Self::send_receive(&mut self.stream, rpc);
 
         let rpc = serde.big_endian().deserialize::<RPC<Response>>(&rpc);
 
@@ -63,18 +98,15 @@ impl Connection {
         // rpc.map_or_else(|err| { println!("error deserializing response: {:?}", err); None }, |rpc| { Some(rpc.data) } )
     }
 
-    fn send_receive(&mut self, serialized: Vec<u8>) -> Vec<u8> {
-        let mut datalengthbuffer = [0u8; 4];
+    fn send_receive(stream: &mut Option<TcpStream>, serialized: Vec<u8>) -> Vec<u8> {
         let mut databuffer = Vec::<u8>::new();
 
-        self.stream.as_mut().map(|stream| {
-            let mut senddata = (serialized.len() as u32).to_be_bytes().to_vec();
-            senddata.extend(serialized);
+        stream.as_mut().map(|stream| {
+            util::send_rpc(stream, serialized).err().map(|err| println!("client::error::sending: {:?}", err));
 
-            stream.write(&senddata).map(|_| stream.read_exact(&mut datalengthbuffer[..])).and_then(|_| {
-                let bytes_to_read = u32::from_be_bytes(datalengthbuffer) as u64;
-                stream.take(bytes_to_read).read_to_end(&mut databuffer)
-            }).err().map(|err| println!("client::error::transmission: {:?}", err));
+            util::read_header(stream)
+                .and_then(|payload_size| util::read_payload(stream, payload_size).map(|payload| databuffer = payload))
+                .err().map(|err| println!("client::error::receiving: {:?}", err));
         });
 
         databuffer
