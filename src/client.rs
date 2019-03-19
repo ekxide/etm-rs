@@ -5,6 +5,10 @@
  * Proprietary and confidential
  */
 
+use crate::rpc::RPC;
+
+use serde::{Serialize, de::DeserializeOwned};
+
 use std::io::prelude::*;
 use std::net::{TcpStream, Ipv4Addr, Shutdown};
 use std::time;
@@ -18,72 +22,61 @@ pub struct Connection {
 impl Connection {
     pub fn new(ip: Ipv4Addr, connection_id : i32) -> Option<Box<Connection>> {
         // request communication port
-        match TcpStream::connect((ip, 0xC390)) {
-            Ok(mut stream) => {
-                // set read timeout
-                let read_timeout = Some(time::Duration::from_secs(2));
-                stream.set_read_timeout(read_timeout);
+        let connection = TcpStream::connect((ip, 0xC390)).and_then(|mut stream| {
+            let read_timeout = Some(time::Duration::from_secs(2));
+            stream.set_read_timeout(read_timeout).err().map(|err| println!("client::error::failed to set tcp timeout: {:?}", err));
 
-                // read the communication port
-                let mut buffer = [0u8; 2];
-                match stream.read_exact(&mut buffer[..]) {
-                    Err(err)  => {println!("client::error::timeout while waiting for communication port::{:?}", err); None},
-                    Ok(_)     => {
-                        // open communication port
-                        let port = u16::from_be_bytes(buffer);
-                        println!("client::assigned port::{}", port);
+            let mut buffer = [0u8; 2];
+            stream.read_exact(&mut buffer[..]).and_then(|_| {
+                let port = u16::from_be_bytes(buffer);
+                println!("client::assigned port::{}", port);
+                TcpStream::connect((ip, port)).and_then(|stream| {
+                    stream.set_nodelay(true).err().map(|err| println!("client::error::failed to set tcp nodelay: {:?}", err));
+                    Ok(Box::new(Connection{id: connection_id, port, stream: Some(stream)}))
+                })
+            })
+        });
 
-                        match TcpStream::connect((ip, port)) {
-                            Ok(stream) => {
-                                println!("client::connection established");
-                                stream.set_nodelay(true);
-                                Some(Box::new(Connection{id: connection_id, port: port, stream: Some(stream)}))},
-                            Err(err)   => {println!("client::error::could not connect to assigned communication port {} at {}::{:?}", port, ip, err); None},
-                        }
-                    },
-                }
-            },
-            Err(err) => {println!("client::error::could not open port for communication request::{:?}", err); None},
+        match connection {
+            Ok(connection) => {println!("client::connection established"); Some(connection)},
+            Err(err) => {println!("client::error::connection: {:?}", err); None},
         }
+        //TODO use map_or_else once feature is in stable rust
+        // connection.map_or_else(|err| { println!(""client::error::connection: {:?}", err); None }, |connection| { Some(connection) } )
     }
 
+    pub fn transceive<Request: Serialize, Response: DeserializeOwned>(&mut self, request: Request) -> Option<Response> {
+        let mut serde = bincode::config();
 
-    pub fn send_receive(&mut self, data_send: Vec<u8>) -> Vec<u8> {
-        if let Some(stream) = self.stream.as_mut() {
-//             println!("client::write data");
+        let rpc = RPC { transmission_id: 42, data: request };
+        let rpc = serde.big_endian().serialize(&rpc).unwrap();
 
-            let mut senddata = (data_send.len() as u32).to_be_bytes().to_vec();
+        let rpc = self.send_receive(rpc);
 
-            senddata.extend(data_send);
+        let rpc = serde.big_endian().deserialize::<RPC<Response>>(&rpc);
 
-            stream.write(&senddata);
-        } else {
-            println!("client::the stream hasn't been initialized yet");
+        match rpc {
+            Ok(rpc) => Some(rpc.data),
+            Err(err) => {println!("error deserializing response: {:?}", err); None},
         }
+        //TODO use map_or_else once feature is in stable rust
+        // rpc.map_or_else(|err| { println!("error deserializing response: {:?}", err); None }, |rpc| { Some(rpc.data) } )
+    }
 
+    fn send_receive(&mut self, serialized: Vec<u8>) -> Vec<u8> {
         let mut datalengthbuffer = [0u8; 4];
-        let mut databuffer = vec![];
+        let mut databuffer = Vec::<u8>::new();
 
-        if let Some(stream) = self.stream.as_mut() {
-            // clear databuffer
-            //databuffer.drain(..);
-            // read data length
-            match stream.read_exact(&mut datalengthbuffer[..]) {
-                Err(_)  => {println!("client::error::reading buffer");},
-                Ok(_) => {
-                    let bytes_to_read = u32::from_be_bytes(datalengthbuffer) as u64;
-                    let mut data = stream.take(bytes_to_read);
-                    match data.read_to_end(&mut databuffer) {
-                        Ok(n) => assert_eq!(bytes_to_read as usize, n),
-                        _ => panic!("client::didn't read enough"),
-                    }
-                },
-            };
-        } else {
-            println!("client::the stream hasn't been initialized yet");
-        }
+        self.stream.as_mut().map(|stream| {
+            let mut senddata = (serialized.len() as u32).to_be_bytes().to_vec();
+            senddata.extend(serialized);
 
-//         println!("client::data received::{:?}", databuffer);
+            stream.write(&senddata).map(|_| stream.read_exact(&mut datalengthbuffer[..])).and_then(|_| {
+                let bytes_to_read = u32::from_be_bytes(datalengthbuffer) as u64;
+                stream.take(bytes_to_read).read_to_end(&mut databuffer)
+            }).err().map(|err| println!("client::error::transmission: {:?}", err));
+        });
+
         databuffer
     }
 }
@@ -92,7 +85,7 @@ impl Drop for Connection {
     fn drop(&mut self) {
         self.stream.as_mut().map(|stream| {
             println!("client::shutdown stream");
-            stream.shutdown(Shutdown::Both);
+            stream.shutdown(Shutdown::Both).err().map(|err| println!("client::error::shutdown stream: {:?}", err));;
         });
     }
 }

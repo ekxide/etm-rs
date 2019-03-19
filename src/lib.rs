@@ -8,6 +8,8 @@
 pub mod server;
 pub mod client;
 
+mod rpc;
+
 #[cfg(test)]
 mod tests {
     #[test]

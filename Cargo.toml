@@ -1,7 +1,10 @@
 [package]
-name = "messaging"
-version = "0.1.0"
+name = "etm"
+description = "easy tcp messaging"
+version = "0.9.0"
 authors = ["Mathias Kraus <mathias.kraus@bobedibob.de>"]
 edition = "2018"
 
 [dependencies]
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.1"

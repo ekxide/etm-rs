@@ -5,10 +5,13 @@
  * Proprietary and confidential
  */
 
+use crate::rpc::RPC;
+
+use serde::{Serialize, de::DeserializeOwned};
+
 use std::io::prelude::*;
 use std::io;
 use std::io::{Error, ErrorKind};
-use std::marker::PhantomData;
 use std::net::{TcpListener, TcpStream, Ipv4Addr};
 use std::{thread, time};
 use std::sync::{Arc, Mutex};
@@ -16,18 +19,21 @@ use std::sync::{Arc, Mutex};
 // TODO: use error_chain
 
 pub trait MessageProcessing {
+    type Request;
+    type Response;
+
     fn new() -> Box<Self>;
 
     fn setup(&mut self, connection_info: String, connection_id: u32) -> () {
         // default implementation das nothing
-        println!("default implementation for MessageProcessing::setup");
+        println!("default implementation for MessageProcessing::setup: {} : {}", connection_info, connection_id);
     }
-    
-    fn execute(&mut self, connection_id: u32, cmd: Vec<u8>) -> Vec<u8>;
-    
+
+    fn execute(&mut self, connection_id: u32, rpc: Self::Request) -> Self::Response;
+
     fn cleanup(&mut self, connection_info: String, connection_id: u32) -> () {
         // default implementation das nothing
-        println!("default implementation for MessageProcessing::cleanup");
+        println!("default implementation for MessageProcessing::cleanup: {} : {}", connection_info, connection_id);
     }
 }
 
@@ -36,7 +42,7 @@ pub struct Server<T: 'static + MessageProcessing + Send> {
     port: u16,
 }
 
-impl <T: 'static + MessageProcessing + Send> Server<T> {
+impl <Req: DeserializeOwned, Resp: Serialize, T: 'static + MessageProcessing<Request = Req, Response = Resp> + Send> Server<T> {
 
     pub fn new(port: u16) -> Self {
         Server {
@@ -44,25 +50,19 @@ impl <T: 'static + MessageProcessing + Send> Server<T> {
             port,
         }
     }
-    
+
     pub fn run(&self) {
         println!("server::run");
-        
+
         let ip = Ipv4Addr::UNSPECIFIED;
 
         // bind port
         let listener = self.bind(ip, self.port).unwrap();
-        
+
         for stream in listener.incoming() {
             println!("server::connenction request");
-            match stream {
-                Ok(stream) => {
-                    if let Err(err) = self.handle_connection_request(stream) {
-                        println!("server::error::connection_handler::handleConnection::{:?}", err);
-                    }
-                },
-                Err(err) => println!("server::error::connection_handler::incomming stream::{:?}", err),
-            }
+            stream.and_then(|stream| self.handle_connection_request(stream))
+                  .err().map(|err| println!("server::error::connection_handler::{:?}", err));
         }
     }
 
@@ -84,12 +84,12 @@ impl <T: 'static + MessageProcessing + Send> Server<T> {
         let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0))?;
         let local_port: u16 = listener.local_addr()?.port();
         let data = local_port.to_be_bytes();
-        
+
         // set write timeout
         stream.set_write_timeout(Some(time::Duration::from_secs(1)))?;
         stream.write(&data)?;
-        
-        // start the server connection connection handler
+
+        // start the server transmission handler
         let message_processing = self.message_processing.clone();
         thread::spawn(move || {Server::<T>::transmission_handler(message_processing, listener)});
         // TODO: store threads in Vec and join them on drop
@@ -105,50 +105,45 @@ impl <T: 'static + MessageProcessing + Send> Server<T> {
                 Err(err)   => {println!("server::error::transmission_handler at waiting for connection::{:?}", err); return Err(err)},
             }
         }
-        
+
         let err = Err(Error::new(ErrorKind::TimedOut, "timeour while waiting for connection"));
         println!("server::error::{:?}", err);
         err
     }
 
     fn transmission_handler(message_processing: Arc<Mutex<Box<T>>>, listener: TcpListener) -> io::Result<()> {
+        let local_port: u16 = listener.local_addr()?.port();
         let ref mut stream = Server::<T>::listener_accept_nonblocking(listener)?;
-        stream.set_nodelay(true);
+        stream.set_nodelay(true).err().map(|err| println!("server::error::failed to set nodelay: {:?}", err) );
 
-        // read the length
+        message_processing.lock().unwrap().setup("TODO: ip address:".to_string() + &local_port.to_string(), 13);
+
+        let mut serde = bincode::config();
         let mut datalengthbuffer = [0u8; 4];
-        
-        message_processing.lock().unwrap().setup("TODO: this is the connection info with ip address and port".to_string(), 13);
-        
-        loop {
-            let mut databuffer: Vec<u8> = vec![];
+
+        let mut running = true;
+        while running {
             // read data length
-            match stream.read_exact(&mut datalengthbuffer[..]) {
-                Err(_)  => {println!("server::error::reading buffer"); break;},
-                Ok(_) => {
-//                     println!("{:?}", datalengthbuffer);
-                    let bytes_to_read = u32::from_be_bytes(datalengthbuffer) as u64;
-                    
-                    match stream.take(bytes_to_read).read_to_end(&mut databuffer) {
-                        Ok(n) => assert_eq!(bytes_to_read as usize, n),
-                        _ => panic!("server::didn't read enough"),
-                    }
-                    
-//                     println!("server::bytes read: {}", bytes_to_read);
-                    
-                    let response = message_processing.lock().unwrap().execute(/*s*/42, databuffer);
-                    let mut senddata = (response.len() as u32).to_be_bytes().to_vec();
-                    senddata.extend(response);
-                    
-                    if let Err(err) = stream.write(&senddata) {
-                        println!("{:?}", err);
-                    }
-                },
-            };
-            
+            stream.read_exact(&mut datalengthbuffer[..]).map(|_| {
+                let bytes_to_read = u32::from_be_bytes(datalengthbuffer) as u64;
+
+                let mut databuffer = Vec::<u8>::new();
+                stream.take(bytes_to_read).read_to_end(&mut databuffer).map(|_| {
+                    let request = serde.big_endian().deserialize::<RPC<Req>>(&databuffer).unwrap();
+
+                    let response = message_processing.lock().unwrap().execute(/*s*/42, request.data);
+
+                    let rpc = RPC { transmission_id: request.transmission_id, data: response };
+                    let serialized = serde.big_endian().serialize(&rpc).unwrap();
+                    let mut senddata = (serialized.len() as u32).to_be_bytes().to_vec();
+                    senddata.extend(serialized);
+
+                    stream.write(&senddata)
+                })
+            }).err().map(|err| { println!("server::transmission error: {:?}", err); running = false; });
         }
-        
-        message_processing.lock().unwrap().cleanup("TODO: this is the connection info with ip address and port".to_string(), 13);
+
+        message_processing.lock().unwrap().cleanup("TODO: ip address:".to_string() + &local_port.to_string(), 13);
 
         println!("server::end transmission_handler");
         Ok(())
