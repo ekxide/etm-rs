@@ -6,7 +6,7 @@
  */
 
 use crate::{ProtocolVersion, Service};
-use crate::rpc::{RPC, ConnectionRequest, ConnectionResponse};
+use crate::rpc::{Request, Response, ConnectionRequest, ConnectionResponse};
 use crate::util;
 
 use serde::{Serialize, de::DeserializeOwned};
@@ -19,8 +19,9 @@ use std::sync::{Arc, Mutex};
 // TODO: use error_chain
 
 pub trait MessageProcessing {
-    type Request;
-    type Response;
+    type Rq;
+    type Rsp;
+    type E;
 
     fn new() -> Box<Self>;
 
@@ -29,7 +30,7 @@ pub trait MessageProcessing {
         println!("default implementation for MessageProcessing::setup: {} : {}", connection_info, connection_id);
     }
 
-    fn execute(&mut self, connection_id: u32, rpc: Self::Request) -> Self::Response;
+    fn execute(&mut self, connection_id: u32, rpc: Self::Rq) -> Result<Self::Rsp, Self::E>;
 
     fn cleanup(&mut self, connection_info: String, connection_id: u32) -> () {
         // default implementation das nothing
@@ -44,7 +45,7 @@ pub struct Server<T: 'static + MessageProcessing + Send> {
     //TODO store connection id in hash map with all assosiated thread join handles
 }
 
-impl <Req: DeserializeOwned, Resp: Serialize, T: 'static + MessageProcessing<Request = Req, Response = Resp> + Send> Server<T> {
+impl <Req: DeserializeOwned, Resp: Serialize, Error: Serialize, T: 'static + MessageProcessing<Rq = Req, Rsp = Resp, E = Error> + Send> Server<T> {
 
     pub fn new(port: u16, service: Service) -> Self {
         Server {
@@ -105,12 +106,12 @@ impl <Req: DeserializeOwned, Resp: Serialize, T: 'static + MessageProcessing<Req
         let mut running = true;
         while running {
             util::read_header(stream).and_then(|payload_size| util::read_payload(stream, payload_size)).and_then(|payload| {
-                let request = serde.big_endian().deserialize::<RPC<Req>>(&payload).unwrap();
+                let req = serde.big_endian().deserialize::<Request<Req>>(&payload).unwrap();
 
-                let response = message_processing.lock().unwrap().execute(request.transmission_id, request.data);
+                let response = message_processing.lock().unwrap().execute(req.transmission_id, req.request);
 
-                let rpc = RPC { transmission_id: request.transmission_id, data: response };
-                let serialized = serde.big_endian().serialize(&rpc).unwrap();
+                let response = Response { transmission_id: req.transmission_id, response };
+                let serialized = serde.big_endian().serialize(&response).unwrap();
                 util::send_rpc(stream, serialized)
             }).err().map(|err| { println!("server::transmission error: {:?}", err); running = false; });
         }

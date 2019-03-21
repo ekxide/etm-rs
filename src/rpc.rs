@@ -25,9 +25,15 @@ pub struct ConnectionResponse {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct RPC<T> {
+pub struct Request<T> {
     pub transmission_id: u32,
-    pub data: T,
+    pub request: T,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub struct Response<T, E> {
+    pub transmission_id: u32,
+    pub response: Result<T, E>,
 }
 
 #[cfg(test)]

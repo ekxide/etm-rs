@@ -6,7 +6,7 @@
  */
 
 use crate::{ProtocolVersion, Service};
-use crate::rpc::{RPC, ConnectionRequest, ConnectionResponse};
+use crate::rpc::{Request, Response, ConnectionRequest, ConnectionResponse};
 use crate::util;
 
 use serde::{Serialize, de::DeserializeOwned};
@@ -80,18 +80,23 @@ impl Connection {
         compatiblity
     }
 
-    pub fn transceive<Request: Serialize, Response: DeserializeOwned>(&mut self, request: Request) -> Option<Response> {
+    pub fn transceive<Req: Serialize, Resp: DeserializeOwned, E: DeserializeOwned + std::fmt::Debug>(&mut self, request: Req) -> Option<Resp> {
         let mut serde = bincode::config();
 
-        let rpc = RPC { transmission_id: 42, data: request };
-        let rpc = serde.big_endian().serialize(&rpc).unwrap();
+        let request = Request { transmission_id: 42, request };
+        let request = serde.big_endian().serialize(&request).unwrap();
 
-        let rpc = Self::send_receive(&mut self.stream, rpc);
+        let resp = Self::send_receive(&mut self.stream, request);
 
-        let rpc = serde.big_endian().deserialize::<RPC<Response>>(&rpc);
+        let resp = serde.big_endian().deserialize::<Response<Resp, E>>(&resp);
 
-        match rpc {
-            Ok(rpc) => Some(rpc.data),
+        match resp {
+            Ok(resp) => {
+                match resp.response {
+                    Ok(response) => Some(response),
+                    Err(err) => {println!("error response: {:?}", err); None},
+                }
+            },
             Err(err) => {println!("error deserializing response: {:?}", err); None},
         }
         //TODO use map_or_else once feature is in stable rust
