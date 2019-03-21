@@ -3,7 +3,8 @@ This crate is used fot the TCP messaging. Clients which don't use this crate mus
 
 ## Data Types
 
-+ struct to request a new connection from the server
+### struct to request a new connection from the server
+
 ```
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct ConnectionRequest {
@@ -12,11 +13,14 @@ pub struct ConnectionRequest {
     pub rpc_interval_timeout_ms: u32,   // -1 infinite
 }
 ```
-    + `protocol_version`: the etm protocol version used by the client as defined in lib.rs
-    + `connection_id`: placeholder; use -1; once implemented, the server will have only one connection for a connection_id; if there is already an open connection, this will be closed before a new connection with the same id is opened; -1 will assign an unused id
-    + `rpc_interval_timeout_ms`: placeholder; use -1; once implemented the client has to send RPCs within the defined interval else the server closes the connection; a value of -1 indicates an infinite timeout
 
-+ struct for response to a connection request with the information to establish the new connection
++ `protocol_version`: the etm protocol version used by the client as defined in lib.rs
++ `connection_id`: placeholder; use -1; once implemented, the server will have only one connection for a connection_id; if there is already an open connection, this will be closed before a new connection with the same id is opened; -1 will assign an unused id
++ `rpc_interval_timeout_ms`: placeholder; use -1; once implemented the client has to send RPCs within the defined interval else the server closes the connection; a value of -1 indicates an infinite timeout
+
+
+### struct for response to a connection request with the information to establish the new connection
+
 ```
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct ConnectionResponse {
@@ -26,12 +30,15 @@ pub struct ConnectionResponse {
     pub service: Service,
 }
 ```
-    + `protocol_version`: the etm protocol version used by the server as defined in lib.rs; client and server protocol versions should be equal; a cute little pony dies if the communication proceeds with dissimilar versions
-    + `port`: the assigned tcp port for the RPCs; the port has to be opened within 2 seconds else stops listening on that port
-    + `connection_id`: placeholder
-    + `service`: a description of the service the server provides; client and server service descripions should be equal; a cute little pony dies if the communication proceeds with dissimilar service descripions
 
-+ struct for service description
++ `protocol_version`: the etm protocol version used by the server as defined in lib.rs; client and server protocol versions should be equal; a cute little pony dies if the communication proceeds with dissimilar versions
++ `port`: the assigned tcp port for the RPCs; the port has to be opened within 2 seconds else stops listening on that port
++ `connection_id`: placeholder
++ `service`: a description of the service the server provides; client and server service descripions should be equal; a cute little pony dies if the communication proceeds with dissimilar service descripions
+
+
+### struct for service description
+
 ```
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct Service {
@@ -39,10 +46,13 @@ pub struct Service {
     protocol_version: u32,
 }
 ```
-    + `id`: name of the service
-    + `protocol_version`: the protocol version of the service
 
-+ struct for a RPC request of type T
++ `id`: name of the service
++ `protocol_version`: the protocol version of the service
+
+
+### struct for a RPC request of type T
+
 ```
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct Request<T> {
@@ -50,10 +60,13 @@ pub struct Request<T> {
     pub data: T,
 }
 ```
-    + `transmission_id`: consecutive number; request and response id must be equal
-    + `data`: of type T
 
-+ struct for resonse of a RPC request with a Result of type T or error E
++ `transmission_id`: consecutive number; request and response id must be equal
++ `data`: of type T
+
+
+### struct for resonse of a RPC request with a Result of type T or error E
+
 ```
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct Response<T, E> {
@@ -61,8 +74,9 @@ pub struct Response<T, E> {
     pub data: Result<T, E>,
 }
 ```
-    + `transmission_id`: consecutive number; request and response id must be equal
-    + `data`: Result of type T or error E
+
++ `transmission_id`: consecutive number; request and response id must be equal
++ `data`: Result of type T or error E
 
 
 ## Establish the connection and transmit RPCs
@@ -145,32 +159,33 @@ pub enum MyResponse {
 pub type MyError = String;
 ```
 Therefore we have `Request<MyRequest>` and `Response<MyResponse, MyError>` as types.
+
 Ping/Pong RPC
 ```
-                        transmission
-             length          id         enum tag   no enum variant
-          _____/\____   _____/\____   _____/\____ therefore no data
-         /           \ /           \ /           \
-Client:  0x00 00 00 08 0x00 00 00 2A 0x00 00 00 00
+                        transmission    enum tag
+             length          id         MyRequest
+          _____/\____   _____/\____   _____/\____
+         /           \ /           \ /           \   no enum variant
+Client:  0x00 00 00 08 0x00 00 00 2A 0x00 00 00 00  therefore no data
 
-Server:  0x00 00 00 08 0x00 00 00 2A 0x00 00 00 00
-         \_____  ____/ \_____  ____/ \_____  ____/
-               \/            \/            \/
-             length     transmission    enum tag   no enum variant
-                             id                   therefore no data
+Server:  0x00 00 00 08 0x00 00 00 2A 0x00 00 00 00 0x00 00 00 00   no enum variant
+         \_____  ____/ \_____  ____/ \_____  ____/ \_____  ____/  therefore no data
+               \/            \/            \/            \/
+             length     transmission    enum tag      enum tag
+                             id         Result        MyResponse
 ```
 
 Answer RPC
 ```
-                        transmission
-             length          id         enum tag   no enum variant
-          _____/\____   _____/\____   _____/\____ therefore no data
-         /           \ /           \ /           \
-Client:  0x00 00 00 08 0x00 00 00 2A 0x00 00 00 01
+                        transmission    enum tag
+             length          id         MyRequest
+          _____/\____   _____/\____   _____/\____
+         /           \ /           \ /           \   no enum variant
+Client:  0x00 00 00 08 0x00 00 00 2A 0x00 00 00 01  therefore no data
 
-Server:  0x00 00 00 1C 0x00 00 00 2A 0x00 00 00 01 0x00 00 00 2A
-         \_____  ____/ \_____  ____/ \_____  ____/ \_____  ____/
-               \/            \/            \/            \/
-             length     transmission    enum tag    enum variant
-                             id                       value 42
+Server:  0x00 00 00 1C 0x00 00 00 2A 0x00 00 00 00 0x00 00 00 00 0x00 00 00 2A
+         \_____  ____/ \_____  ____/ \_____  ____/ \_____  ____/ \_____  ____/
+               \/            \/            \/            \/            \/
+             length     transmission    enum tag      enum tag     enum variant
+                             id         Result        MyResponse     value 42
 ```
