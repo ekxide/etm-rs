@@ -81,40 +81,40 @@ pub struct Response<T, E> {
 
 ## Establish the connection and transmit RPCs
 ```
-Client                                                    Server
-  |                                                         |
-  |  client opens connection reqest port (e.g. 0xABBA)      |
-  |    and transmit ConnectionRequest struct                |
-  | ------------------------------------------------------> |
-  |                                                         |
-  |        server transmits with ConnectionResponse struct  |
-  | <------------------------------------------------------ |
-  |                                                         |
-  |  client opens port from ConnectionResponse              |
-  | ------------------------------------------------------> |
-  |                                                         |
-  |  client closes connection request port (e.g. 0xABBA)    |
-  | ------------------------------------------------------> |
-  |                                                         |
-  |                                                         |
-  |  client transmits a RPC Request                         |
-  | ------------------------------------------------------> |
-  |                                                         |
-  |                        server transmits a RPC Response  |
-  | <------------------------------------------------------ |
-  |                            .                            |
-  |                            .                            |
-  |                            .                            |
-  |                                                         |
-  |  client transmits a RPC Request                         |
-  | ------------------------------------------------------> |
-  |                                                         |
-  |                        server transmits a RPC Response  |
-  | <------------------------------------------------------ |
-  |                                                         |
-  |  client closes port                                     |
-  | ------------------------------------------------------> |
-  |                                                         |
+Client                                                         Server
+  |                                                              |
+  |  client opens connection reqest port (e.g. 0xABBA)           |
+  |    and transmits a ConnectionRequest                         |
+  | -----------------------------------------------------------> |
+  |                                                              |
+  |                       server transmits a ConnectionResponse  |
+  | <----------------------------------------------------------- |
+  |                                                              |
+  |  client opens port from ConnectionResponse                   |
+  | -----------------------------------------------------------> |
+  |                                                              |
+  |  client closes connection request port (e.g. 0xABBA)         |
+  | -----------------------------------------------------------> |
+  |                                                              |
+  |                                                              |
+  |  client transmits a RPC Request                              |
+  | -----------------------------------------------------------> |
+  |                                                              |
+  |                             server transmits a RPC Response  |
+  | <----------------------------------------------------------- |
+  |                            .                                 |
+  |                            .                                 |
+  |                            .                                 |
+  |                                                              |
+  |  client transmits a RPC Request                              |
+  | -----------------------------------------------------------> |
+  |                                                              |
+  |                             server transmits a RPC Response  |
+  | <----------------------------------------------------------- |
+  |                                                              |
+  |  client closes port                                          |
+  | -----------------------------------------------------------> |
+  |                                                              |
 ```
 
 ## Transmissions
@@ -168,7 +168,7 @@ Ping/Pong RPC
          /           \ /           \ /           \   no enum variant
 Client:  0x00 00 00 08 0x00 00 00 2A 0x00 00 00 00  therefore no data
 
-Server:  0x00 00 00 08 0x00 00 00 2A 0x00 00 00 00 0x00 00 00 00   no enum variant
+Server:  0x00 00 00 0C 0x00 00 00 2A 0x00 00 00 00 0x00 00 00 00   no enum variant
          \_____  ____/ \_____  ____/ \_____  ____/ \_____  ____/  therefore no data
                \/            \/            \/            \/
              length     transmission    enum tag      enum tag
@@ -183,7 +183,7 @@ Answer RPC
          /           \ /           \ /           \   no enum variant
 Client:  0x00 00 00 08 0x00 00 00 2A 0x00 00 00 01  therefore no data
 
-Server:  0x00 00 00 1C 0x00 00 00 2A 0x00 00 00 00 0x00 00 00 00 0x00 00 00 2A
+Server:  0x00 00 00 10 0x00 00 00 2A 0x00 00 00 00 0x00 00 00 01 0x00 00 00 2A
          \_____  ____/ \_____  ____/ \_____  ____/ \_____  ____/ \_____  ____/
                \/            \/            \/            \/            \/
              length     transmission    enum tag      enum tag     enum variant
