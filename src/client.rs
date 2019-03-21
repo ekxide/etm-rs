@@ -36,7 +36,7 @@ impl Connection {
         let protocol_version = ProtocolVersion::entity().version();
         let mut serde = bincode::config();
 
-        let rpc = ConnectionRequest { protocol_version, connection_id: std::u32::MAX, max_cmd_interval_ms: std::u32::MAX };
+        let rpc = ConnectionRequest { protocol_version, connection_id: std::u32::MAX, rpc_interval_timeout_ms: std::u32::MAX };
 
         let serialized = serde.big_endian().serialize(&rpc).unwrap();
         let payload = Self::send_receive(&mut stream, serialized);
@@ -83,16 +83,16 @@ impl Connection {
     pub fn transceive<Req: Serialize, Resp: DeserializeOwned, E: DeserializeOwned + std::fmt::Debug>(&mut self, request: Req) -> Option<Resp> {
         let mut serde = bincode::config();
 
-        let request = Request { transmission_id: 42, request };
+        let request = Request { transmission_id: 42, data: request };
         let request = serde.big_endian().serialize(&request).unwrap();
 
-        let resp = Self::send_receive(&mut self.stream, request);
+        let response = Self::send_receive(&mut self.stream, request);
 
-        let resp = serde.big_endian().deserialize::<Response<Resp, E>>(&resp);
+        let response = serde.big_endian().deserialize::<Response<Resp, E>>(&response);
 
-        match resp {
-            Ok(resp) => {
-                match resp.response {
+        match response {
+            Ok(response) => {
+                match response.data {
                     Ok(response) => Some(response),
                     Err(err) => {println!("error response: {:?}", err); None},
                 }

@@ -36,6 +36,10 @@ pub trait MessageProcessing {
         // default implementation das nothing
         println!("default implementation for MessageProcessing::cleanup: {} : {}", connection_info, connection_id);
     }
+
+    // TODO
+    // - add post_transmission (to be able to perform an action after the message is sent over TCP)
+    // - add connection change handler (to be able to perform special actions on first open/last close, e.g. blink LED)
 }
 
 pub struct Server<T: 'static + MessageProcessing + Send> {
@@ -106,11 +110,11 @@ impl <Req: DeserializeOwned, Resp: Serialize, Error: Serialize, T: 'static + Mes
         let mut running = true;
         while running {
             util::read_header(stream).and_then(|payload_size| util::read_payload(stream, payload_size)).and_then(|payload| {
-                let req = serde.big_endian().deserialize::<Request<Req>>(&payload).unwrap();
+                let request = serde.big_endian().deserialize::<Request<Req>>(&payload).unwrap();
 
-                let response = message_processing.lock().unwrap().execute(req.transmission_id, req.request);
+                let response = message_processing.lock().unwrap().execute(request.transmission_id, request.data);
 
-                let response = Response { transmission_id: req.transmission_id, response };
+                let response = Response { transmission_id: request.transmission_id, data: response };
                 let serialized = serde.big_endian().serialize(&response).unwrap();
                 util::send_rpc(stream, serialized)
             }).err().map(|err| { println!("server::transmission error: {:?}", err); running = false; });
