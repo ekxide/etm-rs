@@ -77,7 +77,7 @@ impl <Req: DeserializeOwned, Resp: Serialize, Error: Serialize, T: 'static + Mes
                     //TODO check the etm protocol version once we have a version bump
                     let request = serde.big_endian().deserialize::<ConnectionRequest>(&payload).unwrap();
                     self.connection_request(request.connection_id).and_then(|port| {
-                        let rpc = ConnectionResponse { protocol_version, port, connection_id: request.connection_id, service: self.service.clone() };
+                        let rpc = ConnectionResponse { protocol_version, connection_id: request.connection_id, port, service: self.service.clone() };
                         let serialized = serde.big_endian().serialize(&rpc).unwrap();
                         util::send_rpc(stream, serialized)
                     })

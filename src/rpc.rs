@@ -19,8 +19,8 @@ pub struct ConnectionRequest {
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct ConnectionResponse {
     pub protocol_version: u32,
-    pub port: u16,
     pub connection_id: u32,         // assigned connection id
+    pub port: u16,
     pub service: Service,
 }
 

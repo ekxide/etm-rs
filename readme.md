@@ -1,4 +1,4 @@
-# TCP messaging
+# ETM - Easy TCP Messaging
 This crate is used fot the TCP messaging. Clients which don't use this crate must implement the following protocol
 
 ## Data Types
@@ -122,17 +122,17 @@ A transmission consists of 4 bytes length of the serialized data followed by the
 
 Example: ConnectionRequest and ConnectionResponse
 ```
-                        etm protocol                 rpc interval
-             length        version   connection id     timeout
-          _____/\____   _____/\____   _____/\____   _____/\____
-         /           \ /           \ /           \ /           \
-Client:  0x00 00 00 0C 0x00 00 00 00 0xFF FF FF FF 0xFF FF FF FF
+                  length of         etm protocol   connection    rpc interval
+              remaining message        version         id          timeout
+          ___________/\__________   _____/\____   _____/\____   _____/\____
+         /                       \ /           \ /           \ /           \
+Client:  0x00 00 00 00 00 00 00 0C 0x00 00 00 00 0xFF FF FF FF 0xFF FF FF FF
 
-Server:  0x00 00 00 1F 0x00 00 00 00 0xA2 D2 0xFF FF FF FF ...
-         \_____  ____/ \_____  ____/ \__  _/ \_____  ____/
-               \/            \/         \/         \/
-             length     etm protocol   port   connection id
-                           version
+Server:  0x00 00 00 00 00 00 00 1F 0x00 00 00 00 0xFF FF FF FF 0xA2 D2...
+         \___________  __________/ \_____  ____/ \_____  ____/ \__  _/
+                     \/                  \/            \/         \/
+                 length of          etm protocol   connection    port
+              remaining message        version         id
 
          ...  0x00 00 00 00 00 00 00 09 0x4D 79 53 65 72 76 69 63 65 0x00 00 00 00
               \________________________| __________________________/ \_____  ____/
@@ -162,30 +162,31 @@ Therefore we have `Request<MyRequest>` and `Response<MyResponse, MyError>` as ty
 
 Ping/Pong RPC
 ```
-                        transmission    enum tag
-             length          id         MyRequest
-          _____/\____   _____/\____   _____/\____
-         /           \ /           \ /           \   no enum variant
-Client:  0x00 00 00 08 0x00 00 00 2A 0x00 00 00 00  therefore no data
+                  length of         transmission    enum tag
+              remaining message          id      MyRequest[Ping]
+          ___________/\__________   _____/\____   _____/\____
+         /                       \ /           \ /           \   no enum content
+Client:  0x00 00 00 00 00 00 00 08 0x00 00 00 2A 0x00 00 00 00  therefore no data
 
-Server:  0x00 00 00 0C 0x00 00 00 2A 0x00 00 00 00 0x00 00 00 00   no enum variant
-         \_____  ____/ \_____  ____/ \_____  ____/ \_____  ____/  therefore no data
-               \/            \/            \/            \/
-             length     transmission    enum tag      enum tag
-                             id         Result        MyResponse
+Server:  0x00 00 00 00 00 00 00 0C 0x00 00 00 2A 0x00 00 00 00 0x00 00 00 00   no enum content
+         \___________  __________/ \_____  ____/ \_____  ____/ \_____  ____/  therefore no data
+                     \/                  \/            \/            \/
+                 length of          transmission    enum tag      enum tag
+              remaining message          id         Result[T]  MyResponse[Pong]
 ```
 
 Answer RPC
 ```
-                        transmission    enum tag
-             length          id         MyRequest
-          _____/\____   _____/\____   _____/\____
-         /           \ /           \ /           \   no enum variant
-Client:  0x00 00 00 08 0x00 00 00 2A 0x00 00 00 01  therefore no data
+                  length of         transmission    enum tag
+              remaining message          id     MyRequest[Answer]
+          ___________/\__________   _____/\____   _____/\____
+         /                       \ /           \ /           \   no enum content
+Client:  0x00 00 00 00 00 00 00 08 0x00 00 00 2A 0x00 00 00 01  therefore no data
 
-Server:  0x00 00 00 10 0x00 00 00 2A 0x00 00 00 00 0x00 00 00 01 0x00 00 00 2A
-         \_____  ____/ \_____  ____/ \_____  ____/ \_____  ____/ \_____  ____/
-               \/            \/            \/            \/            \/
-             length     transmission    enum tag      enum tag     enum variant
-                             id         Result        MyResponse     value 42
+Server:  0x00 00 00 00 00 00 00 10 0x00 00 00 2A 0x00 00 00 00 0x00 00 00 01 0x00 00 00 2A
+         \___________  __________/ \_____  ____/ \_____  ____/ \_____  ____/ \_____  ____/
+                     \/                  \/            \/            \/            \/
+                 length of          transmission    enum tag      enum tag    enum content
+              remaining message          id         Result[T]    MyResponse       [42]
+                                                                  [Answer]
 ```
