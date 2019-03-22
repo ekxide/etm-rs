@@ -23,11 +23,11 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(ip: Ipv4Addr, connection_id : i32) -> Option<Box<Connection>> {
+    pub fn new(ip: Ipv4Addr, connection_request_port: u16, connection_id : i32) -> Option<Box<Connection>> {
         let mut connection: Option<Box<Connection>> = None;
         let mut stream: Option<TcpStream> = None;
         //TODO the port should also be configurable from outside of ETM
-        TcpStream::connect((ip, 0xC390)).map(|stream_port| {
+        TcpStream::connect((ip, connection_request_port)).map(|stream_port| {
             let read_timeout = Some(time::Duration::from_secs(2));
             stream_port.set_read_timeout(read_timeout).err().map(|err| println!("client::error::failed to set tcp timeout: {:?}", err));
             stream = Some(stream_port);
