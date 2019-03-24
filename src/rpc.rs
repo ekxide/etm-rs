@@ -7,19 +7,19 @@
 
 use crate::Service;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct ConnectionRequest {
     pub protocol_version: u32,
-    pub connection_id: u32,             // -1 dynamic
-    pub rpc_interval_timeout_ms: u32,   // -1 infinite
+    pub connection_id: u32,           // -1 dynamic
+    pub rpc_interval_timeout_ms: u32, // -1 infinite
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct ConnectionResponse {
     pub protocol_version: u32,
-    pub connection_id: u32,         // assigned connection id
+    pub connection_id: u32, // assigned connection id
     pub port: u16,
     pub service: Service,
 }

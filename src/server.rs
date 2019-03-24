@@ -5,16 +5,16 @@
  * Proprietary and confidential
  */
 
-use crate::{ProtocolVersion, Service};
-use crate::rpc::{Request, Response, ConnectionRequest, ConnectionResponse};
+use crate::rpc::{ConnectionRequest, ConnectionResponse, Request, Response};
 use crate::util;
+use crate::{ProtocolVersion, Service};
 
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 
 use std::io;
-use std::net::{TcpListener, Ipv4Addr};
-use std::thread;
+use std::net::{Ipv4Addr, TcpListener};
 use std::sync::{Arc, Mutex};
+use std::thread;
 
 // TODO: use error_chain
 
@@ -25,16 +25,22 @@ pub trait MessageProcessing {
 
     fn new() -> Box<Self>;
 
-    fn setup(&mut self, connection_info: String, connection_id: u32) -> () {
+    fn setup(&mut self, connection_info: String, connection_id: u32) {
         // default implementation das nothing
-        println!("default implementation for MessageProcessing::setup: {} : {}", connection_info, connection_id);
+        println!(
+            "default implementation for MessageProcessing::setup: {} : {}",
+            connection_info, connection_id
+        );
     }
 
     fn execute(&mut self, connection_id: u32, rpc: Self::Rq) -> Result<Self::Rsp, Self::E>;
 
-    fn cleanup(&mut self, connection_info: String, connection_id: u32) -> () {
+    fn cleanup(&mut self, connection_info: String, connection_id: u32) {
         // default implementation das nothing
-        println!("default implementation for MessageProcessing::cleanup: {} : {}", connection_info, connection_id);
+        println!(
+            "default implementation for MessageProcessing::cleanup: {} : {}",
+            connection_info, connection_id
+        );
     }
 
     // TODO
@@ -49,8 +55,13 @@ pub struct Server<T: 'static + MessageProcessing + Send> {
     //TODO store connection id in hash map with all assosiated thread join handles
 }
 
-impl <Req: DeserializeOwned, Resp: Serialize, Error: Serialize, T: 'static + MessageProcessing<Rq = Req, Rsp = Resp, E = Error> + Send> Server<T> {
-
+impl<
+        Req: DeserializeOwned,
+        Resp: Serialize,
+        Error: Serialize,
+        T: 'static + MessageProcessing<Rq = Req, Rsp = Resp, E = Error> + Send,
+    > Server<T>
+{
     pub fn new(port: u16, service: Service) -> Self {
         Server {
             message_processing: Arc::new(Mutex::new(T::new())),
@@ -73,15 +84,30 @@ impl <Req: DeserializeOwned, Resp: Serialize, Error: Serialize, T: 'static + Mes
         for mut stream in listener.incoming() {
             if let Ok(stream) = stream.as_mut() {
                 println!("server::connection request");
-                util::read_header(stream).and_then(|payload_size| util::read_payload(stream, payload_size)).and_then(|payload| {
-                    //TODO check the etm protocol version once we have a version bump
-                    let request = serde.big_endian().deserialize::<ConnectionRequest>(&payload).unwrap();
-                    self.connection_request(request.connection_id).and_then(|port| {
-                        let rpc = ConnectionResponse { protocol_version, connection_id: request.connection_id, port, service: self.service.clone() };
-                        let serialized = serde.big_endian().serialize(&rpc).unwrap();
-                        util::send_rpc(stream, serialized)
+                if let Some(err) = util::read_header(stream)
+                    .and_then(|payload_size| util::read_payload(stream, payload_size))
+                    .and_then(|payload| {
+                        //TODO check the etm protocol version once we have a version bump
+                        let request = serde
+                            .big_endian()
+                            .deserialize::<ConnectionRequest>(&payload)
+                            .unwrap();
+                        self.connection_request(request.connection_id)
+                            .and_then(|port| {
+                                let rpc = ConnectionResponse {
+                                    protocol_version,
+                                    connection_id: request.connection_id,
+                                    port,
+                                    service: self.service.clone(),
+                                };
+                                let serialized = serde.big_endian().serialize(&rpc).unwrap();
+                                util::send_rpc(stream, serialized)
+                            })
                     })
-                }).err().map(|err| println!("server::error::connection request::{:?}", err));
+                    .err()
+                {
+                    println!("server::error::connection request::{:?}", err);
+                }
             }
         }
         println!("server::run -> stop");
@@ -93,34 +119,64 @@ impl <Req: DeserializeOwned, Resp: Serialize, Error: Serialize, T: 'static + Mes
 
         // start the server transmission handler
         let message_processing = self.message_processing.clone();
-        thread::spawn(move || {Server::<T>::transmission_handler(message_processing, listener, connection_id)}); // TODO: store threads in Vec and join them on drop
+        thread::spawn(move || {
+            Server::<T>::transmission_handler(message_processing, listener, connection_id)
+        }); // TODO: store threads in Vec and join them on drop
 
         Ok(local_port)
     }
 
-    fn transmission_handler(message_processing: Arc<Mutex<Box<T>>>, listener: TcpListener, connection_id: u32) -> io::Result<()> {
+    fn transmission_handler(
+        message_processing: Arc<Mutex<Box<T>>>,
+        listener: TcpListener,
+        connection_id: u32,
+    ) -> io::Result<()> {
         let local_port: u16 = listener.local_addr()?.port();
-        let ref mut stream = util::listener_accept_nonblocking(listener)?;
-        stream.set_nodelay(true).err().map(|err| println!("server::error::failed to set nodelay: {:?}", err) );
+        let stream = &mut util::listener_accept_nonblocking(listener)?;
+        if let Some(err) = stream.set_nodelay(true).err() {
+            println!("server::error::failed to set nodelay: {:?}", err);
+        }
 
-        message_processing.lock().unwrap().setup("TODO: ip address:".to_string() + &local_port.to_string(), connection_id);
+        message_processing.lock().unwrap().setup(
+            "TODO: ip address:".to_string() + &local_port.to_string(),
+            connection_id,
+        );
 
         let mut serde = bincode::config();
 
         let mut running = true;
         while running {
-            util::read_header(stream).and_then(|payload_size| util::read_payload(stream, payload_size)).and_then(|payload| {
-                let request = serde.big_endian().deserialize::<Request<Req>>(&payload).unwrap();
+            if let Some(err) = util::read_header(stream)
+                .and_then(|payload_size| util::read_payload(stream, payload_size))
+                .and_then(|payload| {
+                    let request = serde
+                        .big_endian()
+                        .deserialize::<Request<Req>>(&payload)
+                        .unwrap();
 
-                let response = message_processing.lock().unwrap().execute(request.transmission_id, request.data);
+                    let response = message_processing
+                        .lock()
+                        .unwrap()
+                        .execute(request.transmission_id, request.data);
 
-                let response = Response { transmission_id: request.transmission_id, data: response };
-                let serialized = serde.big_endian().serialize(&response).unwrap();
-                util::send_rpc(stream, serialized)
-            }).err().map(|err| { println!("server::transmission error: {:?}", err); running = false; });
+                    let response = Response {
+                        transmission_id: request.transmission_id,
+                        data: response,
+                    };
+                    let serialized = serde.big_endian().serialize(&response).unwrap();
+                    util::send_rpc(stream, serialized)
+                })
+                .err()
+            {
+                println!("server::transmission error: {:?}", err);
+                running = false;
+            };
         }
 
-        message_processing.lock().unwrap().cleanup("TODO: ip address:".to_string() + &local_port.to_string(), connection_id);
+        message_processing.lock().unwrap().cleanup(
+            "TODO: ip address:".to_string() + &local_port.to_string(),
+            connection_id,
+        );
 
         println!("server::end transmission_handler");
         Ok(())

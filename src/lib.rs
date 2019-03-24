@@ -5,13 +5,13 @@
  * Proprietary and confidential
  */
 
-pub mod server;
 pub mod client;
+pub mod server;
 
 mod rpc;
 mod util;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 pub use util::listener_accept_nonblocking;
 
@@ -21,7 +21,11 @@ pub struct ProtocolVersion {
 
 impl ProtocolVersion {
     pub fn entity() -> Self {
-        ProtocolVersion{version: env!("CARGO_PKG_VERSION_MAJOR").parse::<u32>().unwrap_or(std::u32::MAX)}
+        ProtocolVersion {
+            version: env!("CARGO_PKG_VERSION_MAJOR")
+                .parse::<u32>()
+                .unwrap_or(std::u32::MAX),
+        }
     }
 
     pub fn version(&self) -> u32 {
@@ -37,7 +41,10 @@ pub struct Service {
 
 impl Service {
     pub fn entity(id: String, protocol_version: u32) -> Self {
-        Service{id, protocol_version}
+        Service {
+            id,
+            protocol_version,
+        }
     }
 
     pub fn id(&self) -> String {
