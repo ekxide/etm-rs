@@ -5,7 +5,7 @@
  * Proprietary and confidential
  */
 
-use crate::rpc::{ConnectionRequest, ConnectionResponse, Request, Response};
+use crate::rpc::{ConnectionRequest, ConnectionResponse, RPCRequest, RPCResponse};
 use crate::util;
 use crate::{ProtocolVersion, Service};
 
@@ -151,7 +151,7 @@ impl<
                 .and_then(|payload| {
                     let request = serde
                         .big_endian()
-                        .deserialize::<Request<Req>>(&payload)
+                        .deserialize::<RPCRequest<Req>>(&payload)
                         .unwrap();
 
                     let response = message_processing
@@ -159,7 +159,7 @@ impl<
                         .unwrap()
                         .execute(request.transmission_id, request.data);
 
-                    let response = Response {
+                    let response = RPCResponse {
                         transmission_id: request.transmission_id,
                         data: response,
                     };

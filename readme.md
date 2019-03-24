@@ -55,7 +55,7 @@ pub struct Service {
 
 ```
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct Request<T> {
+pub struct RPCRequest<T> {
     pub transmission_id: u32,
     pub data: T,
 }
@@ -69,7 +69,7 @@ pub struct Request<T> {
 
 ```
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct Response<T, E> {
+pub struct RPCResponse<T, E> {
     pub transmission_id: u32,
     pub data: Result<T, E>,
 }
@@ -97,19 +97,19 @@ Client                                                         Server
   | -----------------------------------------------------------> |
   |                                                              |
   |                                                              |
-  |  client transmits a RPC Request                              |
+  |  client transmits a RPCRequest                               |
   | -----------------------------------------------------------> |
   |                                                              |
-  |                             server transmits a RPC Response  |
+  |                              server transmits a RPCResponse  |
   | <----------------------------------------------------------- |
   |                            .                                 |
   |                            .                                 |
   |                            .                                 |
   |                                                              |
-  |  client transmits a RPC Request                              |
+  |  client transmits a RPCRequest                               |
   | -----------------------------------------------------------> |
   |                                                              |
-  |                             server transmits a RPC Response  |
+  |                              server transmits a RPCResponse  |
   | <----------------------------------------------------------- |
   |                                                              |
   |  client closes port                                          |
@@ -118,7 +118,7 @@ Client                                                         Server
 ```
 
 ## Transmissions
-A transmission consists of 4 bytes length of the serialized data followed by the serialized ConnectionRequest or ConnectionResponse or Request or Response. Everything is encoded in networg order.
+A transmission consists of 8 bytes length of the serialized data followed by the serialized ConnectionRequest or ConnectionResponse or RPCRequest or RPCResponse. Everything is encoded in networg order.
 
 Example: ConnectionRequest and ConnectionResponse
 ```
@@ -158,7 +158,7 @@ pub enum MyResponse {
 
 pub type MyError = String;
 ```
-Therefore we have `Request<MyRequest>` and `Response<MyResponse, MyError>` as types.
+Therefore we have `RPCRequest<MyRequest>` and `RPCResponse<MyResponse, MyError>` as types.
 
 Ping/Pong RPC
 ```

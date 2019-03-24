@@ -5,7 +5,7 @@
  * Proprietary and confidential
  */
 
-use crate::rpc::{ConnectionRequest, ConnectionResponse, Request, Response};
+use crate::rpc::{ConnectionRequest, ConnectionResponse, RPCRequest, RPCResponse};
 use crate::util;
 use crate::{ProtocolVersion, Service};
 
@@ -137,7 +137,7 @@ impl Connection {
     ) -> Option<Resp> {
         let mut serde = bincode::config();
 
-        let request = Request {
+        let request = RPCRequest {
             transmission_id: 42,
             data: request,
         };
@@ -147,7 +147,7 @@ impl Connection {
 
         let response = serde
             .big_endian()
-            .deserialize::<Response<Resp, E>>(&response);
+            .deserialize::<RPCResponse<Resp, E>>(&response);
 
         match response {
             Ok(response) => match response.data {
