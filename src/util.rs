@@ -34,6 +34,9 @@ pub fn listener_accept_nonblocking(listener: TcpListener) -> io::Result<TcpStrea
                     "server::transmission_handler::connection to address {}",
                     socket_address
                 );
+                if let Some(err) = stream.set_nonblocking(false).err() {
+                    println!("client::error::failed to set tcp blocking: {:?}", err);
+                }
                 return Ok(stream);
             }
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {

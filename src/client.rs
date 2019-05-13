@@ -30,13 +30,19 @@ impl Connection {
     ) -> Option<Box<Connection>> {
         let mut connection: Option<Box<Connection>> = None;
         let mut stream: Option<TcpStream> = None;
-        //TODO the port should also be configurable from outside of ETM
+
         if let Some(err) = TcpStream::connect((ip, connection_request_port))
             .map(|stream_port| {
                 let read_timeout = Some(time::Duration::from_secs(2));
 
                 if let Some(err) = stream_port.set_read_timeout(read_timeout).err() {
                     println!("client::error::failed to set tcp timeout: {:?}", err)
+                }
+                if let Some(err) = stream_port.set_nodelay(true).err() {
+                    println!("client::error::failed to set tcp nodelay: {:?}", err);
+                }
+                if let Some(err) = stream_port.set_nonblocking(false).err() {
+                    println!("client::error::failed to set tcp blocking: {:?}", err);
                 }
 
                 stream = Some(stream_port);
@@ -67,6 +73,9 @@ impl Connection {
                     .map(|stream| {
                         if let Some(err) = stream.set_nodelay(true).err() {
                             println!("client::error::failed to set tcp nodelay: {:?}", err);
+                        }
+                        if let Some(err) = stream.set_nonblocking(false).err() {
+                            println!("client::error::failed to set tcp blocking: {:?}", err);
                         }
 
                         println!("connected to service: '{}'", response.service.id());

@@ -84,6 +84,10 @@ impl<
         for mut stream in listener.incoming() {
             if let Ok(stream) = stream.as_mut() {
                 println!("server::connection request");
+                if let Some(err) = stream.set_nonblocking(false).err() {
+                    println!("client::error::failed to set tcp blocking: {:?}", err);
+                }
+
                 if let Some(err) = util::read_header(stream)
                     .and_then(|payload_size| util::read_payload(stream, payload_size))
                     .and_then(|payload| {
