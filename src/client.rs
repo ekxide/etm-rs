@@ -11,7 +11,7 @@ use crate::{ProtocolVersion, Service};
 
 use serde::{de::DeserializeOwned, Serialize};
 
-use std::net::{Ipv4Addr, Shutdown, TcpStream};
+use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpStream};
 use std::time;
 
 pub struct Connection {
@@ -31,7 +31,8 @@ impl Connection {
         let mut connection: Option<Box<Connection>> = None;
         let mut stream: Option<TcpStream> = None;
 
-        if let Some(err) = TcpStream::connect((ip, connection_request_port))
+        let addr = SocketAddr::from((ip, connection_request_port));
+        if let Some(err) = TcpStream::connect_timeout(&addr, time::Duration::from_secs(2))
             .map(|stream_port| {
                 let read_timeout = Some(time::Duration::from_secs(2));
 
@@ -69,7 +70,8 @@ impl Connection {
             .deserialize::<ConnectionResponse>(&payload)
             .map(|response| {
                 println!("client::assigned port::{}", response.port);
-                if let Some(err) = TcpStream::connect((ip, response.port))
+                let addr = SocketAddr::from((ip, response.port));
+                if let Some(err) = TcpStream::connect_timeout(&addr, time::Duration::from_secs(2))
                     .map(|stream| {
                         if let Some(err) = stream.set_nodelay(true).err() {
                             println!("client::error::failed to set tcp nodelay: {:?}", err);
