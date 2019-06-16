@@ -5,7 +5,8 @@
  * Proprietary and confidential
  */
 
-use crate::rpc::{ConnectionRequest, ConnectionResponse, RPCRequest, RPCResponse};
+use crate::mgmt;
+use crate::rpc::{RPCRequest, RPCResponse, ETMError};
 use crate::util;
 use crate::{ProtocolVersion, Service};
 
@@ -54,23 +55,17 @@ impl Connection {
         }
 
         let protocol_version = ProtocolVersion::entity().version();
-        let mut serde = bincode::config();
 
-        let rpc = ConnectionRequest {
+        let rpc = mgmt::Request::Connect(mgmt::CommParams {
             protocol_version,
             connection_id: std::u32::MAX,
             rpc_interval_timeout_ms: std::u32::MAX,
-        };
+        });
 
-        let serialized = serde.big_endian().serialize(&rpc).unwrap();
-        let payload = Self::send_receive(&mut stream, serialized);
-
-        if let Some(err) = serde
-            .big_endian()
-            .deserialize::<ConnectionResponse>(&payload)
-            .map(|response| {
-                println!("client::assigned port::{}", response.port);
-                let addr = SocketAddr::from((ip, response.port));
+        if let Some(response) = Self::transceive_generic::<mgmt::Request, mgmt::Response, ETMError>(&mut stream, rpc) {
+            if let mgmt::Response::Connect(comm_settings) = response {
+                println!("client::assigned port::{}", comm_settings.port);
+                let addr = SocketAddr::from((ip, comm_settings.port));
                 if let Some(err) = TcpStream::connect_timeout(&addr, time::Duration::from_secs(2))
                     .map(|stream| {
                         if let Some(err) = stream.set_nodelay(true).err() {
@@ -80,13 +75,13 @@ impl Connection {
                             println!("client::error::failed to set tcp blocking: {:?}", err);
                         }
 
-                        println!("connected to service: '{}'", response.service.id());
+                        println!("connected to service: '{}'", comm_settings.service.id());
                         connection = Some(Box::new(Connection {
-                            id: response.connection_id,
-                            port: response.port,
+                            id: comm_settings.connection_id,
+                            port: comm_settings.port,
                             stream: Some(stream),
-                            server_protocol_version: response.protocol_version,
-                            server_service: response.service,
+                            server_protocol_version: comm_settings.protocol_version,
+                            server_service: comm_settings.service,
                         }));
                     })
                     .err()
@@ -96,10 +91,7 @@ impl Connection {
                         err
                     )
                 };
-            })
-            .err()
-        {
-            println!("client::error::deserialize response: {:?}", err);
+            };
         }
 
         connection
@@ -146,6 +138,17 @@ impl Connection {
         &mut self,
         request: Req,
     ) -> Option<Resp> {
+        Self::transceive_generic::<Req, Resp, E>(&mut self.stream, request)
+    }
+
+    fn transceive_generic<
+        Req: Serialize,
+        Resp: DeserializeOwned,
+        E: DeserializeOwned + std::fmt::Debug,
+    >(
+        stream: &mut Option<TcpStream>,
+        request: Req,
+    ) -> Option<Resp> {
         let mut serde = bincode::config();
 
         let request = RPCRequest {
@@ -154,7 +157,7 @@ impl Connection {
         };
         let request = serde.big_endian().serialize(&request).unwrap();
 
-        let response = Self::send_receive(&mut self.stream, request);
+        let response = Self::send_receive(stream, request);
 
         let response = serde
             .big_endian()

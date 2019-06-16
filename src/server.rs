@@ -5,14 +5,15 @@
  * Proprietary and confidential
  */
 
-use crate::rpc::{ConnectionRequest, ConnectionResponse, RPCRequest, RPCResponse};
+use crate::mgmt;
+use crate::rpc::{RPCRequest, RPCResponse, ETMError};
 use crate::util;
 use crate::{ProtocolVersion, Service};
 
 use serde::{de::DeserializeOwned, Serialize};
 
 use std::io;
-use std::net::{Ipv4Addr, TcpListener};
+use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -70,51 +71,74 @@ impl<
         }
     }
 
-    pub fn run(&self) {
+    pub fn run(&self) -> io::Result<()> {
         println!("server::run");
-
-        let protocol_version = ProtocolVersion::entity().version();
-        let mut serde = bincode::config();
 
         let ip = Ipv4Addr::UNSPECIFIED;
 
         // bind port
-        let listener = util::bind(ip, self.port).unwrap();
+        let listener = util::bind(ip, self.port)?;
 
-        for mut stream in listener.incoming() {
-            if let Ok(stream) = stream.as_mut() {
-                println!("server::connection request");
-                if let Some(err) = stream.set_nonblocking(false).err() {
-                    println!("client::error::failed to set tcp blocking: {:?}", err);
-                }
+        let mut serde = bincode::config();
 
-                if let Some(err) = util::read_header(stream)
-                    .and_then(|payload_size| util::read_payload(stream, payload_size))
-                    .and_then(|payload| {
-                        //TODO check the etm protocol version once we have a version bump
-                        let request = serde
-                            .big_endian()
-                            .deserialize::<ConnectionRequest>(&payload)
-                            .unwrap();
-                        self.connection_request(request.connection_id)
-                            .and_then(|port| {
-                                let rpc = ConnectionResponse {
-                                    protocol_version,
-                                    connection_id: request.connection_id,
-                                    port,
-                                    service: self.service.clone(),
-                                };
-                                let serialized = serde.big_endian().serialize(&rpc).unwrap();
-                                util::send_rpc(stream, serialized)
-                            })
-                    })
-                    .err()
-                {
-                    println!("server::error::connection request::{:?}", err);
-                }
+        for stream in listener.incoming() {
+            match stream {
+                Ok(stream) => {
+                    if let Err(e) = self.handle_mgmt_request(stream, serde.big_endian()) {
+                        println!("server::run -> mgmt request error: {:?}", e);
+                    }
+                },
+                Err(e) => println!("server::run -> error: {:?}", e),
             }
         }
         println!("server::run -> stop");
+        Ok(())
+    }
+
+    fn handle_mgmt_request(&self, mut stream: TcpStream, serde: &mut bincode::Config) -> io::Result<()> {
+        println!("server::connection request");
+        stream.set_nonblocking(false)?;
+
+        let protocol_version = ProtocolVersion::entity().version();
+
+        let payload_size = util::read_header(&mut stream)?;
+        let payload = util::read_payload(&mut stream, payload_size)?;
+
+        let request = serde
+            .deserialize::<RPCRequest<mgmt::Request>>(&payload)
+            .unwrap();  //TODO error handling
+
+        match request.data {
+            mgmt::Request::Identify{protocol_version} => {
+                let rpc = mgmt::Response::Identify(mgmt::Identity {
+                    protocol_version,
+                    service: self.service.clone(),
+                });
+                let rpc = RPCResponse::<mgmt::Response, ETMError> {
+                    transmission_id: 0,
+                    data: Ok(rpc),
+                };
+                let serialized = serde.serialize(&rpc).unwrap();
+                util::send_rpc(&mut stream, serialized)?;
+            },
+            mgmt::Request::Connect(params) => {
+                let port = self.connection_request(params.connection_id)?;
+                let rpc = mgmt::Response::Connect(mgmt::CommSettings {
+                    protocol_version,
+                    connection_id: params.connection_id,
+                    port,
+                    service: self.service.clone(),
+                });
+                let rpc = RPCResponse::<mgmt::Response, ETMError> {
+                    transmission_id: 0,
+                    data: Ok(rpc),
+                };
+                let serialized = serde.serialize(&rpc).unwrap();
+                util::send_rpc(&mut stream, serialized)?;
+            },
+        }
+
+        Ok(())
     }
 
     fn connection_request(&self, connection_id: u32) -> io::Result<u16> {
@@ -147,6 +171,7 @@ impl<
         );
 
         let mut serde = bincode::config();
+        let serde = serde.big_endian();
 
         let mut running = true;
         while running {
@@ -154,7 +179,6 @@ impl<
                 .and_then(|payload_size| util::read_payload(stream, payload_size))
                 .and_then(|payload| {
                     let request = serde
-                        .big_endian()
                         .deserialize::<RPCRequest<Req>>(&payload)
                         .unwrap();
 
@@ -167,7 +191,7 @@ impl<
                         transmission_id: request.transmission_id,
                         data: response,
                     };
-                    let serialized = serde.big_endian().serialize(&response).unwrap();
+                    let serialized = serde.serialize(&response).unwrap();
                     util::send_rpc(stream, serialized)
                 })
                 .err()

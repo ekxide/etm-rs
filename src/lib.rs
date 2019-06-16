@@ -8,6 +8,7 @@
 pub mod client;
 pub mod server;
 
+mod mgmt;
 mod rpc;
 mod util;
 
