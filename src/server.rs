@@ -6,7 +6,7 @@
  */
 
 use crate::mgmt;
-use crate::rpc::{RPCRequest, RPCResponse, ETMError};
+use crate::rpc;
 use crate::util;
 use crate::{ProtocolVersion, Service};
 
@@ -105,7 +105,7 @@ impl<
         let payload = util::read_payload(&mut stream, payload_size)?;
 
         let request = serde
-            .deserialize::<RPCRequest<mgmt::Request>>(&payload)
+            .deserialize::<rpc::Request<mgmt::Request>>(&payload)
             .unwrap();  //TODO error handling
 
         match request.data {
@@ -114,7 +114,7 @@ impl<
                     protocol_version,
                     service: self.service.clone(),
                 });
-                let rpc = RPCResponse::<mgmt::Response, ETMError> {
+                let rpc = rpc::Response::<mgmt::Response, rpc::Error> {
                     transmission_id: 0,
                     data: Ok(rpc),
                 };
@@ -129,7 +129,7 @@ impl<
                     port,
                     service: self.service.clone(),
                 });
-                let rpc = RPCResponse::<mgmt::Response, ETMError> {
+                let rpc = rpc::Response::<mgmt::Response, rpc::Error> {
                     transmission_id: 0,
                     data: Ok(rpc),
                 };
@@ -179,7 +179,7 @@ impl<
                 .and_then(|payload_size| util::read_payload(stream, payload_size))
                 .and_then(|payload| {
                     let request = serde
-                        .deserialize::<RPCRequest<Req>>(&payload)
+                        .deserialize::<rpc::Request<Req>>(&payload)
                         .unwrap();
 
                     let response = message_processing
@@ -187,7 +187,7 @@ impl<
                         .unwrap()
                         .execute(request.transmission_id, request.data);
 
-                    let response = RPCResponse {
+                    let response = rpc::Response {
                         transmission_id: request.transmission_id,
                         data: response,
                     };

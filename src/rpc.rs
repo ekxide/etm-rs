@@ -8,18 +8,18 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct RPCRequest<T> {
+pub struct Request<T> {
     pub transmission_id: u32,
     pub data: T,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct RPCResponse<T, E> {
+pub struct Response<T, E> {
     pub transmission_id: u32,
     pub data: Result<T, E>,
 }
 
-pub type ETMError = String;
+pub type Error = String;
 
 #[cfg(test)]
 mod tests {

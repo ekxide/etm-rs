@@ -6,7 +6,7 @@
  */
 
 use crate::mgmt;
-use crate::rpc::{RPCRequest, RPCResponse, ETMError};
+use crate::rpc;
 use crate::util;
 use crate::{ProtocolVersion, Service};
 
@@ -62,7 +62,7 @@ impl Connection {
             rpc_interval_timeout_ms: std::u32::MAX,
         });
 
-        if let Some(response) = Self::transceive_generic::<mgmt::Request, mgmt::Response, ETMError>(&mut stream, rpc) {
+        if let Some(response) = Self::transceive_generic::<mgmt::Request, mgmt::Response, rpc::Error>(&mut stream, rpc) {
             if let mgmt::Response::Connect(comm_settings) = response {
                 println!("client::assigned port::{}", comm_settings.port);
                 let addr = SocketAddr::from((ip, comm_settings.port));
@@ -151,7 +151,7 @@ impl Connection {
     ) -> Option<Resp> {
         let mut serde = bincode::config();
 
-        let request = RPCRequest {
+        let request = rpc::Request {
             transmission_id: 42,
             data: request,
         };
@@ -161,7 +161,7 @@ impl Connection {
 
         let response = serde
             .big_endian()
-            .deserialize::<RPCResponse<Resp, E>>(&response);
+            .deserialize::<rpc::Response<Resp, E>>(&response);
 
         match response {
             Ok(response) => match response.data {
