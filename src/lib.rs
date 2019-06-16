@@ -23,9 +23,7 @@ pub struct ProtocolVersion {
 impl ProtocolVersion {
     pub fn entity() -> Self {
         ProtocolVersion {
-            version: env!("CARGO_PKG_VERSION_MAJOR")
-                .parse::<u32>()
-                .unwrap_or(std::u32::MAX),
+            version: 0,
         }
     }
 

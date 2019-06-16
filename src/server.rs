@@ -96,10 +96,9 @@ impl<
     }
 
     fn handle_mgmt_request(&self, mut stream: TcpStream, serde: &mut bincode::Config) -> io::Result<()> {
-        println!("server::connection request");
         stream.set_nonblocking(false)?;
 
-        let protocol_version = ProtocolVersion::entity().version();
+        let server_protocol_version = ProtocolVersion::entity().version();
 
         let payload_size = util::read_header(&mut stream)?;
         let payload = util::read_payload(&mut stream, payload_size)?;
@@ -108,10 +107,16 @@ impl<
             .deserialize::<rpc::Request<mgmt::Request>>(&payload)
             .unwrap();  //TODO error handling
 
+        println!("fubar");
+
         match request.data {
             mgmt::Request::Identify{protocol_version} => {
+                println!("server::identify request");
+                if server_protocol_version != protocol_version {
+                    println!("server::identify -> incompatible protocol versions; server: {}, client: {}", server_protocol_version, protocol_version);
+                }
                 let rpc = mgmt::Response::Identify(mgmt::Identity {
-                    protocol_version,
+                    protocol_version: server_protocol_version,
                     service: self.service.clone(),
                 });
                 let rpc = rpc::Response::<mgmt::Response, rpc::Error> {
@@ -122,12 +127,11 @@ impl<
                 util::send_rpc(&mut stream, serialized)?;
             },
             mgmt::Request::Connect(params) => {
+                println!("server::connection request");
                 let port = self.connection_request(params.connection_id)?;
                 let rpc = mgmt::Response::Connect(mgmt::CommSettings {
-                    protocol_version,
                     connection_id: params.connection_id,
                     port,
-                    service: self.service.clone(),
                 });
                 let rpc = rpc::Response::<mgmt::Response, rpc::Error> {
                     transmission_id: 0,

@@ -24,10 +24,8 @@ pub struct CommParams {
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct CommSettings {
-    pub protocol_version: u32,
     pub connection_id: u32, // assigned connection id
     pub port: u16,
-    pub service: Service,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]

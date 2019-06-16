@@ -26,14 +26,64 @@ pub struct Connection {
 impl Connection {
     pub fn new(
         ip: Ipv4Addr,
-        connection_request_port: u16,
+        service_management_port: u16,
         connection_id: i32,
     ) -> Option<Box<Connection>> {
         let mut connection: Option<Box<Connection>> = None;
+
+        let addr = SocketAddr::from((ip, service_management_port));
+
+        let protocol_version = ProtocolVersion::entity().version();
+        let identify = mgmt::Request::Identify { protocol_version };
+
+        if let Some(response) = Self::mgmt_transceive(&addr, identify) {
+            if let mgmt::Response::Identify(identity) = response {
+                let comm_params = mgmt::Request::Connect(mgmt::CommParams {
+                    protocol_version,
+                    connection_id: std::u32::MAX,
+                    rpc_interval_timeout_ms: std::u32::MAX,
+                });
+                if let Some(response) = Self::mgmt_transceive(&addr, comm_params) {
+                    if let mgmt::Response::Connect(comm_settings) = response {
+                        println!("client::assigned port::{}", comm_settings.port);
+                        let addr = SocketAddr::from((ip, comm_settings.port));
+                        if let Some(err) = TcpStream::connect_timeout(&addr, time::Duration::from_secs(2))
+                            .map(|stream| {
+                                if let Some(err) = stream.set_nodelay(true).err() {
+                                    println!("client::error::failed to set tcp nodelay: {:?}", err);
+                                }
+                                if let Some(err) = stream.set_nonblocking(false).err() {
+                                    println!("client::error::failed to set tcp blocking: {:?}", err);
+                                }
+
+                                println!("connected to service: '{}'", identity.service.id());
+                                connection = Some(Box::new(Connection {
+                                    id: comm_settings.connection_id,
+                                    port: comm_settings.port,
+                                    stream: Some(stream),
+                                    server_protocol_version: identity.protocol_version,
+                                    server_service: identity.service,
+                                }));
+                            })
+                            .err()
+                        {
+                            println!(
+                                "client::error::failed to open communication port: {:?}",
+                                err
+                            )
+                        };
+                    };
+                }
+            }
+        }
+
+        connection
+    }
+
+    fn mgmt_transceive(addr: &SocketAddr, req: mgmt::Request) -> Option<mgmt::Response> {
         let mut stream: Option<TcpStream> = None;
 
-        let addr = SocketAddr::from((ip, connection_request_port));
-        if let Some(err) = TcpStream::connect_timeout(&addr, time::Duration::from_secs(2))
+        if let Some(err) = TcpStream::connect_timeout(addr, time::Duration::from_secs(2))
             .map(|stream_port| {
                 let read_timeout = Some(time::Duration::from_secs(2));
 
@@ -54,47 +104,7 @@ impl Connection {
             println!("client::error::failed to open tcp port: {:?}", err)
         }
 
-        let protocol_version = ProtocolVersion::entity().version();
-
-        let rpc = mgmt::Request::Connect(mgmt::CommParams {
-            protocol_version,
-            connection_id: std::u32::MAX,
-            rpc_interval_timeout_ms: std::u32::MAX,
-        });
-
-        if let Some(response) = Self::transceive_generic::<mgmt::Request, mgmt::Response, rpc::Error>(&mut stream, rpc) {
-            if let mgmt::Response::Connect(comm_settings) = response {
-                println!("client::assigned port::{}", comm_settings.port);
-                let addr = SocketAddr::from((ip, comm_settings.port));
-                if let Some(err) = TcpStream::connect_timeout(&addr, time::Duration::from_secs(2))
-                    .map(|stream| {
-                        if let Some(err) = stream.set_nodelay(true).err() {
-                            println!("client::error::failed to set tcp nodelay: {:?}", err);
-                        }
-                        if let Some(err) = stream.set_nonblocking(false).err() {
-                            println!("client::error::failed to set tcp blocking: {:?}", err);
-                        }
-
-                        println!("connected to service: '{}'", comm_settings.service.id());
-                        connection = Some(Box::new(Connection {
-                            id: comm_settings.connection_id,
-                            port: comm_settings.port,
-                            stream: Some(stream),
-                            server_protocol_version: comm_settings.protocol_version,
-                            server_service: comm_settings.service,
-                        }));
-                    })
-                    .err()
-                {
-                    println!(
-                        "client::error::failed to open communication port: {:?}",
-                        err
-                    )
-                };
-            };
-        }
-
-        connection
+        Self::transceive_generic::<mgmt::Request, mgmt::Response, rpc::Error>(&mut stream, req)
     }
 
     pub fn compatibility_check(&self, service: Service) -> bool {
