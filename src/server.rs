@@ -6,12 +6,13 @@
  */
 
 use crate::mgmt;
-use crate::rpc;
+use crate::transport;
 use crate::util;
 use crate::{ProtocolVersion, Service};
 
 use serde::{de::DeserializeOwned, Serialize};
 
+use std::convert::TryFrom;
 use std::io;
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
@@ -59,7 +60,7 @@ pub struct Server<T: 'static + MessageProcessing + Send> {
 impl<
         Req: DeserializeOwned,
         Resp: Serialize,
-        Error: Serialize,
+        Error: Serialize + std::fmt::Debug,
         T: 'static + MessageProcessing<Rq = Req, Rsp = Resp, E = Error> + Send,
     > Server<T>
 {
@@ -104,42 +105,42 @@ impl<
         let payload = util::read_payload(&mut stream, payload_size)?;
 
         let request = serde
-            .deserialize::<rpc::Request<mgmt::Request>>(&payload)
+            .deserialize::<transport::Transmission<mgmt::Request>>(&payload)
             .unwrap();  //TODO error handling
 
-        println!("fubar");
-
-        match request.data {
-            mgmt::Request::Identify{protocol_version} => {
-                println!("server::identify request");
-                if server_protocol_version != protocol_version {
-                    println!("server::identify -> incompatible protocol versions; server: {}, client: {}", server_protocol_version, protocol_version);
-                }
-                let rpc = mgmt::Response::Identify(mgmt::Identity {
-                    protocol_version: server_protocol_version,
-                    service: self.service.clone(),
-                });
-                let rpc = rpc::Response::<mgmt::Response, rpc::Error> {
-                    transmission_id: 0,
-                    data: Ok(rpc),
-                };
-                let serialized = serde.serialize(&rpc).unwrap();
-                util::send_rpc(&mut stream, serialized)?;
-            },
-            mgmt::Request::Connect(params) => {
-                println!("server::connection request");
-                let port = self.connection_request(params.connection_id)?;
-                let rpc = mgmt::Response::Connect(mgmt::CommSettings {
-                    connection_id: params.connection_id,
-                    port,
-                });
-                let rpc = rpc::Response::<mgmt::Response, rpc::Error> {
-                    transmission_id: 0,
-                    data: Ok(rpc),
-                };
-                let serialized = serde.serialize(&rpc).unwrap();
-                util::send_rpc(&mut stream, serialized)?;
-            },
+        if let transport::Type::Request(request) = request.r#type {
+            match request {
+                mgmt::Request::Identify{protocol_version} => {
+                    println!("server::identify request");
+                    if server_protocol_version != protocol_version {
+                        println!("server::identify -> incompatible protocol versions; server: {}, client: {}", server_protocol_version, protocol_version);
+                    }
+                    let identity = mgmt::Response::Identify(mgmt::Identity {
+                        protocol_version: server_protocol_version,
+                        service: self.service.clone(),
+                    });
+                    let response = transport::Transmission {
+                        id: 0,
+                        r#type: transport::Type::Response(identity),
+                    };
+                    let serialized = serde.serialize(&response).unwrap();
+                    util::send_rpc(&mut stream, serialized)?;
+                },
+                mgmt::Request::Connect(params) => {
+                    println!("server::connection request");
+                    let port = self.connection_request(params.connection_id)?;
+                    let comm_settings = mgmt::Response::Connect(mgmt::CommSettings {
+                        connection_id: params.connection_id,
+                        port,
+                    });
+                    let response = transport::Transmission {
+                        id: 0,
+                        r#type: transport::Type::Response(comm_settings),
+                    };
+                    let serialized = serde.serialize(&response).unwrap();
+                    util::send_rpc(&mut stream, serialized)?;
+                },
+            }
         }
 
         Ok(())
@@ -182,21 +183,46 @@ impl<
             if let Some(err) = util::read_header(stream)
                 .and_then(|payload_size| util::read_payload(stream, payload_size))
                 .and_then(|payload| {
+
+                    let (tid, r#type) = payload.split_at(8 as usize);
+                    let transmission_id = u64::from_be_bytes(<[u8; 8]>::try_from(tid).unwrap());
+
                     let request = serde
-                        .deserialize::<rpc::Request<Req>>(&payload)
-                        .unwrap();
+                        .deserialize::<transport::Type<Req>>(r#type)
+                        .unwrap();  //TODO error handling
 
-                    let response = message_processing
-                        .lock()
-                        .unwrap()
-                        .execute(request.transmission_id, request.data);
+                    if let transport::Type::Request(cmd) = request {
+                        let response = message_processing
+                            .lock()
+                            .unwrap()
+                            .execute(connection_id, cmd);
 
-                    let response = rpc::Response {
-                        transmission_id: request.transmission_id,
-                        data: response,
-                    };
-                    let serialized = serde.serialize(&response).unwrap();
-                    util::send_rpc(stream, serialized)
+                        match response {
+                            Ok(response) => {
+                                let response = transport::Transmission {
+                                    id: transmission_id,
+                                    r#type: transport::Type::Response(response),
+                                };
+                                let serialized = serde.serialize(&response).unwrap();
+                                util::send_rpc(stream, serialized)
+                            },
+                            Err(err) => {
+                                let response = transport::Transmission {
+                                    id: transmission_id,
+                                    r#type: transport::Type::Error(err),
+                                };
+                                let serialized = serde.serialize(&response).unwrap();
+                                util::send_rpc(stream, serialized)
+                            },
+                        }
+                    } else {
+                        let response = transport::Transmission {
+                            id: transmission_id,
+                            r#type: transport::Type::Error("fubar".to_string()),
+                        };
+                        let serialized = serde.serialize(&response).unwrap();
+                        util::send_rpc(stream, serialized)
+                    }
                 })
                 .err()
             {

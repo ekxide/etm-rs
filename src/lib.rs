@@ -7,9 +7,9 @@
 
 pub mod client;
 pub mod server;
+pub mod transport;
 
 mod mgmt;
-mod rpc;
 mod util;
 
 use serde::{Deserialize, Serialize};

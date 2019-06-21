@@ -6,7 +6,7 @@
  */
 
 use crate::mgmt;
-use crate::rpc;
+use crate::transport;
 use crate::util;
 use crate::{ProtocolVersion, Service};
 
@@ -104,7 +104,7 @@ impl Connection {
             println!("client::error::failed to open tcp port: {:?}", err)
         }
 
-        Self::transceive_generic::<mgmt::Request, mgmt::Response, rpc::Error>(&mut stream, req)
+        Self::transceive_generic::<mgmt::Request, mgmt::Response, transport::Error>(&mut stream, req)
     }
 
     pub fn compatibility_check(&self, service: Service) -> bool {
@@ -142,7 +142,7 @@ impl Connection {
 
     pub fn transceive<
         Req: Serialize,
-        Resp: DeserializeOwned,
+        Resp: DeserializeOwned + std::fmt::Debug,
         E: DeserializeOwned + std::fmt::Debug,
     >(
         &mut self,
@@ -153,7 +153,7 @@ impl Connection {
 
     fn transceive_generic<
         Req: Serialize,
-        Resp: DeserializeOwned,
+        Resp: DeserializeOwned + std::fmt::Debug,
         E: DeserializeOwned + std::fmt::Debug,
     >(
         stream: &mut Option<TcpStream>,
@@ -161,25 +161,32 @@ impl Connection {
     ) -> Option<Resp> {
         let mut serde = bincode::config();
 
-        let request = rpc::Request {
-            transmission_id: 42,
-            data: request,
+        let transmission = transport::Transmission {
+            id: 42,
+            r#type: transport::Type::Request(request),
         };
-        let request = serde.big_endian().serialize(&request).unwrap();
 
-        let response = Self::send_receive(stream, request);
+        let transmission = serde.big_endian().serialize(&transmission).unwrap();
+
+        let response = Self::send_receive(stream, transmission);
 
         let response = serde
             .big_endian()
-            .deserialize::<rpc::Response<Resp, E>>(&response);
+            .deserialize::<transport::Transmission<Resp>>(&response);
 
         match response {
-            Ok(response) => match response.data {
-                Ok(response) => Some(response),
-                Err(err) => {
+            Ok(response) => match response.r#type {
+                transport::Type::Response(response) => {
+                    Some(response)
+                },
+                transport::Type::Error(err) => {
                     println!("error response: {:?}", err);
                     None
-                }
+                },
+                unexpected @ _ => {
+                    println!("error unexpected response: {:?}", unexpected);
+                    None
+                },
             },
             Err(err) => {
                 println!("error deserializing response: {:?}", err);
@@ -187,7 +194,7 @@ impl Connection {
             }
         }
         //TODO use map_or_else once feature is in stable rust
-        // rpc.map_or_else(|err| { println!("error deserializing response: {:?}", err); None }, |rpc| { Some(rpc.data) } )
+        // response.map_or_else(|err| { println!("error deserializing response: {:?}", err); None }, |response| { Some(response.r#type) } )
     }
 
     fn send_receive(stream: &mut Option<TcpStream>, serialized: Vec<u8>) -> Vec<u8> {

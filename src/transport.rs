@@ -7,19 +7,22 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct Request<T> {
-    pub transmission_id: u32,
-    pub data: T,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct Response<T, E> {
-    pub transmission_id: u32,
-    pub data: Result<T, E>,
-}
-
 pub type Error = String;
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub enum Type<T> {
+    Error(T),
+    End,
+    Request(T),
+    Response(T),
+    Stream(T),
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub struct Transmission<T> {
+    pub id: u64, // maybe tag instead of id?
+    pub r#type: Type<T>,
+}
 
 #[cfg(test)]
 mod tests {
