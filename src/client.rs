@@ -201,13 +201,13 @@ impl Connection {
         let mut databuffer = Vec::<u8>::new();
 
         if let Some(stream) = stream.as_mut() {
-            if let Some(err) = util::send_rpc(stream, serialized).err() {
+            if let Some(err) = util::write_transmission(stream, serialized).err() {
                 println!("client::error::sending: {:?}", err);
             }
 
-            if let Some(err) = util::read_header(stream)
+            if let Some(err) = util::wait_for_transmission(stream)
                 .and_then(|payload_size| {
-                    util::read_payload(stream, payload_size).map(|payload| databuffer = payload)
+                    util::read_transmission(stream, payload_size).map(|payload| databuffer = payload)
                 })
                 .err()
             {

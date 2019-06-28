@@ -101,8 +101,8 @@ impl<
 
         let server_protocol_version = ProtocolVersion::entity().version();
 
-        let payload_size = util::read_header(&mut stream)?;
-        let payload = util::read_payload(&mut stream, payload_size)?;
+        let payload_size = util::wait_for_transmission(&mut stream)?;
+        let payload = util::read_transmission(&mut stream, payload_size)?;
 
         let request = serde
             .deserialize::<transport::Transmission<mgmt::Request>>(&payload)
@@ -124,7 +124,7 @@ impl<
                         r#type: transport::Type::Response(identity),
                     };
                     let serialized = serde.serialize(&response).unwrap();
-                    util::send_rpc(&mut stream, serialized)?;
+                    util::write_transmission(&mut stream, serialized)?;
                 },
                 mgmt::Request::Connect(params) => {
                     println!("server::connection request");
@@ -138,7 +138,7 @@ impl<
                         r#type: transport::Type::Response(comm_settings),
                     };
                     let serialized = serde.serialize(&response).unwrap();
-                    util::send_rpc(&mut stream, serialized)?;
+                    util::write_transmission(&mut stream, serialized)?;
                 },
             }
         }
@@ -180,8 +180,8 @@ impl<
 
         let mut running = true;
         while running {
-            if let Some(err) = util::read_header(stream)
-                .and_then(|payload_size| util::read_payload(stream, payload_size))
+            if let Some(err) = util::wait_for_transmission(stream)
+                .and_then(|payload_size| util::read_transmission(stream, payload_size))
                 .and_then(|payload| {
 
                     let (tid, r#type) = payload.split_at(8 as usize);
@@ -204,7 +204,7 @@ impl<
                                     r#type: transport::Type::Response(response),
                                 };
                                 let serialized = serde.serialize(&response).unwrap();
-                                util::send_rpc(stream, serialized)
+                                util::write_transmission(stream, serialized)
                             },
                             Err(err) => {
                                 let response = transport::Transmission {
@@ -212,7 +212,7 @@ impl<
                                     r#type: transport::Type::Error(err),
                                 };
                                 let serialized = serde.serialize(&response).unwrap();
-                                util::send_rpc(stream, serialized)
+                                util::write_transmission(stream, serialized)
                             },
                         }
                     } else {
@@ -221,7 +221,7 @@ impl<
                             r#type: transport::Type::Error("fubar".to_string()),
                         };
                         let serialized = serde.serialize(&response).unwrap();
-                        util::send_rpc(stream, serialized)
+                        util::write_transmission(stream, serialized)
                     }
                 })
                 .err()

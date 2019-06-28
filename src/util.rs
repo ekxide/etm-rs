@@ -61,22 +61,19 @@ pub fn listener_accept_nonblocking(listener: TcpListener) -> io::Result<TcpStrea
     err
 }
 
-pub fn read_header(stream: &mut TcpStream) -> io::Result<u64> {
+pub fn wait_for_transmission(stream: &mut TcpStream) -> io::Result<u64> {
     let mut datalengthbuffer = [0u8; 8];
-    stream
-        .read_exact(&mut datalengthbuffer[..])
-        .and_then(|_| Ok(u64::from_be_bytes(datalengthbuffer)))
+    stream.read_exact(&mut datalengthbuffer[..])?;
+    Ok(u64::from_be_bytes(datalengthbuffer))
 }
 
-pub fn read_payload(stream: &mut TcpStream, payload_size: u64) -> io::Result<Vec<u8>> {
+pub fn read_transmission(stream: &mut TcpStream, payload_size: u64) -> io::Result<Vec<u8>> {
     let mut databuffer = Vec::<u8>::new();
-    stream
-        .take(payload_size)
-        .read_to_end(&mut databuffer)
-        .and_then(|_| Ok(databuffer))
+    stream.take(payload_size).read_to_end(&mut databuffer)?;
+    Ok(databuffer)
 }
 
-pub fn send_rpc(stream: &mut TcpStream, serialized: Vec<u8>) -> io::Result<usize> {
+pub fn write_transmission(stream: &mut TcpStream, serialized: Vec<u8>) -> io::Result<usize> {
     let mut senddata = (serialized.len() as u64).to_be_bytes().to_vec();
     senddata.extend(serialized);
 
