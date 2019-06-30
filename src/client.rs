@@ -13,23 +13,35 @@ use crate::{ProtocolVersion, Service};
 use serde::{de::DeserializeOwned, Serialize};
 
 use std::io;
+use std::marker::PhantomData;
 use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpStream};
 use std::time;
 
-pub struct Connection {
+pub struct Connection<Req, Resp, Error>
+    where Req: Serialize
+        , Resp: DeserializeOwned + std::fmt::Debug
+        , Error: DeserializeOwned + std::fmt::Debug
+{
     id: u32,
     port: u16,
     stream: TcpStream,
     server_protocol_version: u32,
     server_service: Service,
+    _req: PhantomData<Req>,
+    _resp: PhantomData<Resp>,
+    _error: PhantomData<Error>,
 }
 
-impl Connection {
+impl<Req, Resp, Error> Connection<Req, Resp, Error>
+    where Req: Serialize
+        , Resp: DeserializeOwned + std::fmt::Debug
+        , Error: DeserializeOwned + std::fmt::Debug
+{
     pub fn new(
         ip: Ipv4Addr,
         service_management_port: u16,
         connection_id: i32,
-    ) -> Option<Box<Connection>> {
+    ) -> Option<Box<Connection<Req, Resp, Error>>> {
         let addr = SocketAddr::from((ip, service_management_port));
 
         let protocol_version = ProtocolVersion::entity().version();
@@ -64,12 +76,15 @@ impl Connection {
         util::adjust_stream(&stream, None).ok()?;
 
         println!("connected to service: '{}'", identity.service.id());
-        Some(Box::new(Connection {
+        Some(Box::new(Connection::<Req, Resp, Error> {
             id: comm_settings.connection_id,
             port: comm_settings.port,
             stream: stream,
             server_protocol_version: identity.protocol_version,
             server_service: identity.service,
+            _req: PhantomData,
+            _resp: PhantomData,
+            _error: PhantomData,
         }))
     }
 
@@ -116,25 +131,15 @@ impl Connection {
         compatiblity
     }
 
-    pub fn transceive<
-        Req: Serialize,
-        Resp: DeserializeOwned + std::fmt::Debug,
-        E: DeserializeOwned + std::fmt::Debug,
-    >(
-        &mut self,
-        request: Req,
-    ) -> Option<Resp> {
-        Self::transceive_generic::<Req, Resp, E>(&mut self.stream, request)
+    pub fn transceive(&mut self, request: Req) -> Option<Resp> {
+        Self::transceive_generic::<Req, Resp, Error>(&mut self.stream, request)
     }
 
-    fn transceive_generic<
-        Req: Serialize,
-        Resp: DeserializeOwned + std::fmt::Debug,
-        E: DeserializeOwned + std::fmt::Debug,
-    >(
-        stream: &mut TcpStream,
-        request: Req,
-    ) -> Option<Resp> {
+    fn transceive_generic<Rq, Rsp, E>(stream: &mut TcpStream, request: Rq) -> Option<Rsp>
+        where Rq: Serialize
+            , Rsp: DeserializeOwned + std::fmt::Debug
+            , E: DeserializeOwned + std::fmt::Debug
+    {
         let mut serde = bincode::config();
         let serde = serde.big_endian();
 
@@ -149,7 +154,7 @@ impl Connection {
 
         let response = Self::send_receive(stream, transmission).ok()?;
 
-        let response = serde.deserialize::<transport::Transmission<Resp>>(&response)
+        let response = serde.deserialize::<transport::Transmission<Rsp>>(&response)
             .map_err(|err| {println!("client::error deserializing response: {:?}", err); err})
             .ok()?;
 
@@ -177,7 +182,11 @@ impl Connection {
     }
 }
 
-impl Drop for Connection {
+impl<Req, Resp, Error> Drop for Connection<Req, Resp, Error>
+    where Req: Serialize
+        , Resp: DeserializeOwned + std::fmt::Debug
+        , Error: DeserializeOwned + std::fmt::Debug
+{
     fn drop(&mut self) {
         println!("client::shutdown stream");
         if let Some(err) = self.stream.shutdown(Shutdown::Both).err() {
