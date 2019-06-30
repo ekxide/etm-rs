@@ -34,9 +34,6 @@ pub fn listener_accept_nonblocking(listener: TcpListener) -> io::Result<TcpStrea
                     "server::transmission_handler::connection to address {}",
                     socket_address
                 );
-                if let Some(err) = stream.set_nonblocking(false).err() {
-                    println!("client::error::failed to set tcp blocking: {:?}", err);
-                }
                 return Ok(stream);
             }
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
@@ -59,6 +56,16 @@ pub fn listener_accept_nonblocking(listener: TcpListener) -> io::Result<TcpStrea
     ));
     println!("server::error::{:?}", err);
     err
+}
+
+pub fn adjust_stream(stream: &TcpStream, read_timeout: Option<time::Duration>) -> io::Result<()> {
+    stream.set_read_timeout(read_timeout)
+        .map_err(|err| {println!("util::error::failed to set read timeout on tcp stream: {:?}", err); err})?;
+    stream.set_nodelay(true)
+        .map_err(|err| {println!("util::error::failed to set nodelay on tcp stream: {:?}", err); err})?;
+    stream.set_nonblocking(false)
+        .map_err(|err| {println!("util::error::failed to set blocking read on tcp stream: {:?}", err); err})?;
+    Ok(())
 }
 
 pub fn wait_for_transmission(stream: &mut TcpStream) -> io::Result<u64> {

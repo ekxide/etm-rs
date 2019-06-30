@@ -49,11 +49,8 @@ impl Connection {
                         let addr = SocketAddr::from((ip, comm_settings.port));
                         if let Some(err) = TcpStream::connect_timeout(&addr, time::Duration::from_secs(2))
                             .map(|stream| {
-                                if let Some(err) = stream.set_nodelay(true).err() {
-                                    println!("client::error::failed to set tcp nodelay: {:?}", err);
-                                }
-                                if let Some(err) = stream.set_nonblocking(false).err() {
-                                    println!("client::error::failed to set tcp blocking: {:?}", err);
+                                if let Some(err) = util::adjust_stream(&stream, None).err() {
+                                    println!("client::error::failed to adjust tcp stream: {:?}", err);
                                 }
 
                                 println!("connected to service: '{}'", identity.service.id());
@@ -81,30 +78,13 @@ impl Connection {
     }
 
     fn mgmt_transceive(addr: &SocketAddr, req: mgmt::Request) -> Option<mgmt::Response> {
-        let mut stream: Option<TcpStream> = None;
+        let stream = TcpStream::connect_timeout(addr, time::Duration::from_secs(2))
+            .map_err(|err| {println!("client::error::failed to open tcp port: {:?}", err); err})
+            .ok()?;
+        let read_timeout = Some(time::Duration::from_secs(2));
+        util::adjust_stream(&stream, read_timeout).ok()?;
 
-        if let Some(err) = TcpStream::connect_timeout(addr, time::Duration::from_secs(2))
-            .map(|stream_port| {
-                let read_timeout = Some(time::Duration::from_secs(2));
-
-                if let Some(err) = stream_port.set_read_timeout(read_timeout).err() {
-                    println!("client::error::failed to set tcp timeout: {:?}", err)
-                }
-                if let Some(err) = stream_port.set_nodelay(true).err() {
-                    println!("client::error::failed to set tcp nodelay: {:?}", err);
-                }
-                if let Some(err) = stream_port.set_nonblocking(false).err() {
-                    println!("client::error::failed to set tcp blocking: {:?}", err);
-                }
-
-                stream = Some(stream_port);
-            })
-            .err()
-        {
-            println!("client::error::failed to open tcp port: {:?}", err)
-        }
-
-        Self::transceive_generic::<mgmt::Request, mgmt::Response, transport::Error>(&mut stream, req)
+        Self::transceive_generic::<mgmt::Request, mgmt::Response, transport::Error>(&mut Some(stream), req)
     }
 
     pub fn compatibility_check(&self, service: Service) -> bool {

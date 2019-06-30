@@ -115,7 +115,7 @@ impl<Req, Resp, Error, T> Server<T>
     }
 
     fn handle_mgmt_request(&self, mut stream: TcpStream, serde: &mut bincode::Config) -> io::Result<()> {
-        stream.set_nonblocking(false)?;
+        util::adjust_stream(&stream, None)?;
 
         const DUMMY_CONNECTION_ID: u32 = 0;
         Self::handle_request(&mut stream, serde, self, DUMMY_CONNECTION_ID)
@@ -141,10 +141,7 @@ impl<Req, Resp, Error, T> Server<T>
     ) -> io::Result<()> {
         let local_port: u16 = listener.local_addr()?.port();
         let stream = &mut util::listener_accept_nonblocking(listener)?;
-        //TODO: move to listener_accept_nonblocking???
-        if let Some(err) = stream.set_nodelay(true).err() {
-            println!("server::error::failed to set nodelay: {:?}", err);
-        }
+        util::adjust_stream(stream, None)?;
 
         message_processing.setup(
             "TODO: ip address:".to_string() + &local_port.to_string(),
