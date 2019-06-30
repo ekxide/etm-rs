@@ -15,19 +15,19 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::convert::TryFrom;
 use std::io;
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 
 // TODO: use error_chain
 
-pub trait MessageProcessing {
+pub trait MessageProcessing : Send + Sync {
     type Rq;
     type Rsp;
     type E;
 
-    fn new() -> Box<Self>;
+    fn new() -> Arc<Self>;
 
-    fn setup(&mut self, connection_info: String, connection_id: u32) {
+    fn setup(&self, connection_info: String, connection_id: u32) {
         // default implementation das nothing
         println!(
             "default implementation for MessageProcessing::setup: {} : {}",
@@ -35,9 +35,9 @@ pub trait MessageProcessing {
         );
     }
 
-    fn execute(&mut self, connection_id: u32, rpc: Self::Rq) -> Result<Self::Rsp, Self::E>;
+    fn execute(&self, connection_id: u32, rpc: Self::Rq) -> Result<Self::Rsp, Self::E>;
 
-    fn cleanup(&mut self, connection_info: String, connection_id: u32) {
+    fn cleanup(&self, connection_info: String, connection_id: u32) {
         // default implementation das nothing
         println!(
             "default implementation for MessageProcessing::cleanup: {} : {}",
@@ -50,23 +50,41 @@ pub trait MessageProcessing {
     // - add connection change handler (to be able to perform special actions on first open/last close, e.g. blink LED)
 }
 
-pub struct Server<T: 'static + MessageProcessing + Send> {
-    message_processing: Arc<Mutex<Box<T>>>,
+
+trait Executor {
+    type Rq;
+    type Rsp;
+    type E;
+
+    fn execute(&self, connection_id: u32, rpc: Self::Rq) -> Result<Self::Rsp, Self::E>;
+}
+
+impl<T: 'static + MessageProcessing> Executor for T {
+    type Rq = <T as MessageProcessing>::Rq;
+    type Rsp = <T as MessageProcessing>::Rsp;
+    type E = <T as MessageProcessing>::E;
+
+    fn execute(&self, connection_id: u32, rpc: Self::Rq) -> Result<Self::Rsp, Self::E> {
+        self.execute(connection_id, rpc)
+    }
+}
+
+pub struct Server<T: 'static + MessageProcessing> {
+    message_processing: Arc<T>,
     port: u16,
     service: Service,
     //TODO store connection id in hash map with all assosiated thread join handles
 }
 
-impl<
-        Req: DeserializeOwned,
-        Resp: Serialize,
-        Error: Serialize + std::fmt::Debug,
-        T: 'static + MessageProcessing<Rq = Req, Rsp = Resp, E = Error> + Send,
-    > Server<T>
+impl<Req, Resp, Error, T> Server<T>
+    where Req: DeserializeOwned
+        , Resp: Serialize
+        , Error: Serialize + std::fmt::Debug
+        , T: 'static + MessageProcessing<Rq = Req, Rsp = Resp, E = Error>
 {
     pub fn new(port: u16, service: Service) -> Self {
         Server {
-            message_processing: Arc::new(Mutex::new(T::new())),
+            message_processing: T::new(),
             port,
             service,
         }
@@ -99,51 +117,8 @@ impl<
     fn handle_mgmt_request(&self, mut stream: TcpStream, serde: &mut bincode::Config) -> io::Result<()> {
         stream.set_nonblocking(false)?;
 
-        let server_protocol_version = ProtocolVersion::entity().version();
-
-        let payload_size = util::wait_for_transmission(&mut stream)?;
-        let payload = util::read_transmission(&mut stream, payload_size)?;
-
-        let request = serde
-            .deserialize::<transport::Transmission<mgmt::Request>>(&payload)
-            .unwrap();  //TODO error handling
-
-        if let transport::Type::Request(request) = request.r#type {
-            match request {
-                mgmt::Request::Identify{protocol_version} => {
-                    println!("server::identify request");
-                    if server_protocol_version != protocol_version {
-                        println!("server::identify -> incompatible protocol versions; server: {}, client: {}", server_protocol_version, protocol_version);
-                    }
-                    let identity = mgmt::Response::Identify(mgmt::Identity {
-                        protocol_version: server_protocol_version,
-                        service: self.service.clone(),
-                    });
-                    let response = transport::Transmission {
-                        id: 0,
-                        r#type: transport::Type::Response(identity),
-                    };
-                    let serialized = serde.serialize(&response).unwrap();
-                    util::write_transmission(&mut stream, serialized)?;
-                },
-                mgmt::Request::Connect(params) => {
-                    println!("server::connection request");
-                    let port = self.connection_request(params.connection_id)?;
-                    let comm_settings = mgmt::Response::Connect(mgmt::CommSettings {
-                        connection_id: params.connection_id,
-                        port,
-                    });
-                    let response = transport::Transmission {
-                        id: 0,
-                        r#type: transport::Type::Response(comm_settings),
-                    };
-                    let serialized = serde.serialize(&response).unwrap();
-                    util::write_transmission(&mut stream, serialized)?;
-                },
-            }
-        }
-
-        Ok(())
+        const DUMMY_CONNECTION_ID: u32 = 0;
+        Self::handle_request(&mut stream, serde, self, DUMMY_CONNECTION_ID)
     }
 
     fn connection_request(&self, connection_id: u32) -> io::Result<u16> {
@@ -160,17 +135,18 @@ impl<
     }
 
     fn transmission_handler(
-        message_processing: Arc<Mutex<Box<T>>>,
+        message_processing: Arc<T>,
         listener: TcpListener,
         connection_id: u32,
     ) -> io::Result<()> {
         let local_port: u16 = listener.local_addr()?.port();
         let stream = &mut util::listener_accept_nonblocking(listener)?;
+        //TODO: move to listener_accept_nonblocking???
         if let Some(err) = stream.set_nodelay(true).err() {
             println!("server::error::failed to set nodelay: {:?}", err);
         }
 
-        message_processing.lock().unwrap().setup(
+        message_processing.setup(
             "TODO: ip address:".to_string() + &local_port.to_string(),
             connection_id,
         );
@@ -180,63 +156,103 @@ impl<
 
         let mut running = true;
         while running {
-            if let Some(err) = util::wait_for_transmission(stream)
-                .and_then(|payload_size| util::read_transmission(stream, payload_size))
-                .and_then(|payload| {
-
-                    let (tid, r#type) = payload.split_at(8 as usize);
-                    let transmission_id = u64::from_be_bytes(<[u8; 8]>::try_from(tid).unwrap());
-
-                    let request = serde
-                        .deserialize::<transport::Type<Req>>(r#type)
-                        .unwrap();  //TODO error handling
-
-                    if let transport::Type::Request(cmd) = request {
-                        let response = message_processing
-                            .lock()
-                            .unwrap()
-                            .execute(connection_id, cmd);
-
-                        match response {
-                            Ok(response) => {
-                                let response = transport::Transmission {
-                                    id: transmission_id,
-                                    r#type: transport::Type::Response(response),
-                                };
-                                let serialized = serde.serialize(&response).unwrap();
-                                util::write_transmission(stream, serialized)
-                            },
-                            Err(err) => {
-                                let response = transport::Transmission {
-                                    id: transmission_id,
-                                    r#type: transport::Type::Error(err),
-                                };
-                                let serialized = serde.serialize(&response).unwrap();
-                                util::write_transmission(stream, serialized)
-                            },
-                        }
-                    } else {
-                        let response = transport::Transmission {
-                            id: transmission_id,
-                            r#type: transport::Type::Error("fubar".to_string()),
-                        };
-                        let serialized = serde.serialize(&response).unwrap();
-                        util::write_transmission(stream, serialized)
-                    }
-                })
-                .err()
+            if let Err(e) = Self::handle_request(stream, serde, &*message_processing, connection_id)
             {
-                println!("server::transmission error: {:?}", err);
+                println!("server::transmission error: {:?}", e);
                 running = false;
             };
         }
 
-        message_processing.lock().unwrap().cleanup(
+        message_processing.cleanup(
             "TODO: ip address:".to_string() + &local_port.to_string(),
             connection_id,
         );
 
         println!("server::end transmission_handler");
         Ok(())
+    }
+
+    fn handle_request<Rq, Rsp, E, U>(stream: &mut TcpStream, serde: &mut bincode::Config, executor: &U, connection_id: u32) -> io::Result<()>
+        where Rq: DeserializeOwned
+            , Rsp: Serialize
+            , E: Serialize + std::fmt::Debug
+            , U: Executor<Rq = Rq, Rsp = Rsp, E = E>
+    {
+
+        let payload_size = util::wait_for_transmission(stream)?;
+        let payload = util::read_transmission(stream, payload_size)?;
+
+        let (tid, r#type) = payload.split_at(8 as usize);
+        let transmission_id = u64::from_be_bytes(<[u8; 8]>::try_from(tid).unwrap());
+
+        let request = serde
+            .deserialize::<transport::Type<Rq>>(r#type)
+            .unwrap();  //TODO error handling
+
+        if let transport::Type::Request(cmd) = request {
+            let response = executor.execute(connection_id, cmd);
+
+            match response {
+                Ok(response) => {
+                    let response = transport::Transmission {
+                        id: transmission_id,
+                        r#type: transport::Type::Response(response),
+                    };
+                    let serialized = serde.serialize(&response).unwrap();
+                    util::write_transmission(stream, serialized)?;
+                },
+                Err(err) => {
+                    let response = transport::Transmission {
+                        id: transmission_id,
+                        r#type: transport::Type::Error(err),
+                    };
+                    let serialized = serde.serialize(&response).unwrap();
+                    util::write_transmission(stream, serialized)?;
+                },
+            }
+        } else {
+            let response = transport::Transmission {
+                id: transmission_id,
+                r#type: transport::Type::Error("Not a request!".to_string()),
+            };
+            let serialized = serde.serialize(&response).unwrap();
+            util::write_transmission(stream, serialized)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<Req, Resp, Error, T> Executor for Server<T>
+    where Req: DeserializeOwned
+        , Resp: Serialize
+        , Error: Serialize + std::fmt::Debug
+        , T: 'static + MessageProcessing<Rq = Req, Rsp = Resp, E = Error>
+{
+    type Rq = mgmt::Request;
+    type Rsp = mgmt::Response;
+    type E = transport::Error;
+    fn execute(&self, _connection_id: u32, rpc: Self::Rq) -> Result<Self::Rsp, Self::E> {
+        match rpc {
+            mgmt::Request::Identify{protocol_version} => {
+                println!("server::identify request");
+                let server_protocol_version = ProtocolVersion::entity().version();
+                if server_protocol_version != protocol_version {
+                    println!("server::identify -> incompatible protocol versions; server: {}, client: {}", server_protocol_version, protocol_version);
+                }
+                Ok(mgmt::Response::Identify(mgmt::Identity {
+                    protocol_version: server_protocol_version,
+                    service: self.service.clone(),
+                }))
+            },
+            mgmt::Request::Connect(params) => {
+                println!("server::connection request");
+                let port = self.connection_request(params.connection_id).unwrap();
+                Ok(mgmt::Response::Connect(mgmt::CommSettings {
+                    connection_id: params.connection_id,
+                    port,
+                }))
+            },
+        }
     }
 }
