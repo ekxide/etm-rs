@@ -128,13 +128,13 @@ impl<Req, Resp, Error, T> Server<T>
         // start the server transmission handler
         let message_processing = self.message_processing.clone();
         thread::spawn(move || {
-            Server::<T>::transmission_handler(message_processing, listener, connection_id)
+            Server::<T>::transceiver(message_processing, listener, connection_id)
         }); // TODO: store threads in Vec and join them on drop
 
         Ok(local_port)
     }
 
-    fn transmission_handler(
+    fn transceiver(
         message_processing: Arc<T>,
         listener: TcpListener,
         connection_id: u32,
@@ -168,7 +168,7 @@ impl<Req, Resp, Error, T> Server<T>
             connection_id,
         );
 
-        println!("server::end transmission_handler");
+        println!("server::end transceiver");
         Ok(())
     }
 
