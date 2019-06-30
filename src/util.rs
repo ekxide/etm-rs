@@ -70,13 +70,15 @@ pub fn adjust_stream(stream: &TcpStream, read_timeout: Option<time::Duration>) -
 
 pub fn wait_for_transmission(stream: &mut TcpStream) -> io::Result<u64> {
     let mut datalengthbuffer = [0u8; 8];
-    stream.read_exact(&mut datalengthbuffer[..])?;
+    stream.read_exact(&mut datalengthbuffer[..])
+        .map_err(|err| {println!("error waiting for transmission: {:?}", err); err})?;
     Ok(u64::from_be_bytes(datalengthbuffer))
 }
 
 pub fn read_transmission(stream: &mut TcpStream, payload_size: u64) -> io::Result<Vec<u8>> {
     let mut databuffer = Vec::<u8>::new();
-    stream.take(payload_size).read_to_end(&mut databuffer)?;
+    stream.take(payload_size).read_to_end(&mut databuffer)
+        .map_err(|err| {println!("error reading transmission: {:?}", err); err})?;
     Ok(databuffer)
 }
 
@@ -84,5 +86,5 @@ pub fn write_transmission(stream: &mut TcpStream, serialized: Vec<u8>) -> io::Re
     let mut senddata = (serialized.len() as u64).to_be_bytes().to_vec();
     senddata.extend(serialized);
 
-    stream.write(&senddata)
+    stream.write(&senddata).map_err(|err| {println!("error writing transmission: {:?}", err); err})
 }

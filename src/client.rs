@@ -12,13 +12,14 @@ use crate::{ProtocolVersion, Service};
 
 use serde::{de::DeserializeOwned, Serialize};
 
+use std::io;
 use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpStream};
 use std::time;
 
 pub struct Connection {
     id: u32,
     port: u16,
-    stream: Option<TcpStream>,
+    stream: TcpStream,
     server_protocol_version: u32,
     server_service: Service,
 }
@@ -66,20 +67,20 @@ impl Connection {
         Some(Box::new(Connection {
             id: comm_settings.connection_id,
             port: comm_settings.port,
-            stream: Some(stream),
+            stream: stream,
             server_protocol_version: identity.protocol_version,
             server_service: identity.service,
         }))
     }
 
     fn mgmt_transceive(addr: &SocketAddr, req: mgmt::Request) -> Option<mgmt::Response> {
-        let stream = TcpStream::connect_timeout(addr, time::Duration::from_secs(2))
+        let mut stream = TcpStream::connect_timeout(addr, time::Duration::from_secs(2))
             .map_err(|err| {println!("client::error::failed to open tcp port: {:?}", err); err})
             .ok()?;
         let read_timeout = Some(time::Duration::from_secs(2));
         util::adjust_stream(&stream, read_timeout).ok()?;
 
-        Self::transceive_generic::<mgmt::Request, mgmt::Response, transport::Error>(&mut Some(stream), req)
+        Self::transceive_generic::<mgmt::Request, mgmt::Response, transport::Error>(&mut stream, req)
     }
 
     pub fn compatibility_check(&self, service: Service) -> bool {
@@ -131,7 +132,7 @@ impl Connection {
         Resp: DeserializeOwned + std::fmt::Debug,
         E: DeserializeOwned + std::fmt::Debug,
     >(
-        stream: &mut Option<TcpStream>,
+        stream: &mut TcpStream,
         request: Req,
     ) -> Option<Resp> {
         let mut serde = bincode::config();
@@ -146,7 +147,7 @@ impl Connection {
             .map_err(|err| {println!("client::error serializing request: {:?}", err); err})
             .ok()?;
 
-        let response = Self::send_receive(stream, transmission);
+        let response = Self::send_receive(stream, transmission).ok()?;
 
         let response = serde.deserialize::<transport::Transmission<Resp>>(&response)
             .map_err(|err| {println!("client::error deserializing response: {:?}", err); err})
@@ -169,35 +170,18 @@ impl Connection {
         // response.map_or_else(|err| { println!("error deserializing response: {:?}", err); None }, |response| { Some(response.r#type) } )
     }
 
-    fn send_receive(stream: &mut Option<TcpStream>, serialized: Vec<u8>) -> Vec<u8> {
-        let mut databuffer = Vec::<u8>::new();
-
-        if let Some(stream) = stream.as_mut() {
-            if let Some(err) = util::write_transmission(stream, serialized).err() {
-                println!("client::error::sending: {:?}", err);
-            }
-
-            if let Some(err) = util::wait_for_transmission(stream)
-                .and_then(|payload_size| {
-                    util::read_transmission(stream, payload_size).map(|payload| databuffer = payload)
-                })
-                .err()
-            {
-                println!("client::error::receiving: {:?}", err);
-            }
-        }
-
-        databuffer
+    fn send_receive(stream: &mut TcpStream, serialized: Vec<u8>) -> io::Result<Vec<u8>> {
+        util::write_transmission(stream, serialized)?;
+        let payload_size =  util::wait_for_transmission(stream)?;
+        util::read_transmission(stream, payload_size)
     }
 }
 
 impl Drop for Connection {
     fn drop(&mut self) {
-        if let Some(stream) = self.stream.as_mut() {
-            println!("client::shutdown stream");
-            if let Some(err) = stream.shutdown(Shutdown::Both).err() {
-                println!("client::error::shutdown stream: {:?}", err);
-            }
+        println!("client::shutdown stream");
+        if let Some(err) = self.stream.shutdown(Shutdown::Both).err() {
+            println!("client::error::shutdown stream: {:?}", err);
         }
     }
 }
