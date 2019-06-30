@@ -135,38 +135,35 @@ impl Connection {
         request: Req,
     ) -> Option<Resp> {
         let mut serde = bincode::config();
+        let serde = serde.big_endian();
 
         let transmission = transport::Transmission {
             id: 42,
             r#type: transport::Type::Request(request),
         };
 
-        let transmission = serde.big_endian().serialize(&transmission).unwrap();
+        let transmission = serde.serialize(&transmission)
+            .map_err(|err| {println!("client::error serializing request: {:?}", err); err})
+            .ok()?;
 
         let response = Self::send_receive(stream, transmission);
 
-        let response = serde
-            .big_endian()
-            .deserialize::<transport::Transmission<Resp>>(&response);
+        let response = serde.deserialize::<transport::Transmission<Resp>>(&response)
+            .map_err(|err| {println!("client::error deserializing response: {:?}", err); err})
+            .ok()?;
 
-        match response {
-            Ok(response) => match response.r#type {
-                transport::Type::Response(response) => {
-                    Some(response)
-                },
-                transport::Type::Error(err) => {
-                    println!("error response: {:?}", err);
-                    None
-                },
-                unexpected @ _ => {
-                    println!("error unexpected response: {:?}", unexpected);
-                    None
-                },
+        match response.r#type {
+            transport::Type::Response(response) => {
+                Some(response)
             },
-            Err(err) => {
-                println!("error deserializing response: {:?}", err);
+            transport::Type::Error(err) => {
+                println!("error response: {:?}", err);
                 None
-            }
+            },
+            unexpected @ _ => {
+                println!("error unexpected response: {:?}", unexpected);
+                None
+            },
         }
         //TODO use map_or_else once feature is in stable rust
         // response.map_or_else(|err| { println!("error deserializing response: {:?}", err); None }, |response| { Some(response.r#type) } )
