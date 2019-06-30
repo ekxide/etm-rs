@@ -29,52 +29,47 @@ impl Connection {
         service_management_port: u16,
         connection_id: i32,
     ) -> Option<Box<Connection>> {
-        let mut connection: Option<Box<Connection>> = None;
-
         let addr = SocketAddr::from((ip, service_management_port));
 
         let protocol_version = ProtocolVersion::entity().version();
         let identify = mgmt::Request::Identify { protocol_version };
 
-        if let Some(response) = Self::mgmt_transceive(&addr, identify) {
-            if let mgmt::Response::Identify(identity) = response {
-                let comm_params = mgmt::Request::Connect(mgmt::CommParams {
-                    protocol_version,
-                    connection_id: std::u32::MAX,
-                    rpc_interval_timeout_ms: std::u32::MAX,
-                });
-                if let Some(response) = Self::mgmt_transceive(&addr, comm_params) {
-                    if let mgmt::Response::Connect(comm_settings) = response {
-                        println!("client::assigned port::{}", comm_settings.port);
-                        let addr = SocketAddr::from((ip, comm_settings.port));
-                        if let Some(err) = TcpStream::connect_timeout(&addr, time::Duration::from_secs(2))
-                            .map(|stream| {
-                                if let Some(err) = util::adjust_stream(&stream, None).err() {
-                                    println!("client::error::failed to adjust tcp stream: {:?}", err);
-                                }
+        let response = Self::mgmt_transceive(&addr, identify)?;
+        let identity = if let mgmt::Response::Identify(identity) = response {
+            Some(identity)
+        } else {
+            println!("client::error wrong response to Identify");
+            None
+        }?;
 
-                                println!("connected to service: '{}'", identity.service.id());
-                                connection = Some(Box::new(Connection {
-                                    id: comm_settings.connection_id,
-                                    port: comm_settings.port,
-                                    stream: Some(stream),
-                                    server_protocol_version: identity.protocol_version,
-                                    server_service: identity.service,
-                                }));
-                            })
-                            .err()
-                        {
-                            println!(
-                                "client::error::failed to open communication port: {:?}",
-                                err
-                            )
-                        };
-                    };
-                }
-            }
-        }
+        let comm_params = mgmt::Request::Connect(mgmt::CommParams {
+            protocol_version,
+            connection_id: std::u32::MAX,
+            rpc_interval_timeout_ms: std::u32::MAX,
+        });
+        let response = Self::mgmt_transceive(&addr, comm_params)?;
+        let comm_settings = if let mgmt::Response::Connect(comm_settings) = response {
+            Some(comm_settings)
+        } else {
+            println!("client::error wrong response to Connect");
+            None
+        }?;
 
-        connection
+        println!("client::assigned port::{}", comm_settings.port);
+        let addr = SocketAddr::from((ip, comm_settings.port));
+        let stream = TcpStream::connect_timeout(&addr, time::Duration::from_secs(2))
+            .map_err(|err| {println!("client::error::failed to open communication port: {:?}", err); err}).ok()?;
+
+        util::adjust_stream(&stream, None).ok()?;
+
+        println!("connected to service: '{}'", identity.service.id());
+        Some(Box::new(Connection {
+            id: comm_settings.connection_id,
+            port: comm_settings.port,
+            stream: Some(stream),
+            server_protocol_version: identity.protocol_version,
+            server_service: identity.service,
+        }))
     }
 
     fn mgmt_transceive(addr: &SocketAddr, req: mgmt::Request) -> Option<mgmt::Response> {
