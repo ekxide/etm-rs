@@ -51,7 +51,7 @@ impl<Req, Resp, Error> Connection<Req, Resp, Error>
         let identity = if let mgmt::Response::Identify(identity) = response {
             Some(identity)
         } else {
-            println!("client::error wrong response to Identify");
+            log::error!("wrong response to Identify");
             None
         }?;
 
@@ -64,18 +64,18 @@ impl<Req, Resp, Error> Connection<Req, Resp, Error>
         let comm_settings = if let mgmt::Response::Connect(comm_settings) = response {
             Some(comm_settings)
         } else {
-            println!("client::error wrong response to Connect");
+            log::error!("wrong response to Connect");
             None
         }?;
 
-        println!("client::assigned port::{}", comm_settings.port);
+        log::info!("assigned port: {}", comm_settings.port);
         let addr = SocketAddr::from((ip, comm_settings.port));
         let stream = TcpStream::connect_timeout(&addr, time::Duration::from_secs(2))
-            .map_err(|err| {println!("client::error::failed to open communication port: {:?}", err); err}).ok()?;
+            .map_err(|err| {log::error!("failed to open communication port: {:?}", err); err}).ok()?;
 
         util::adjust_stream(&stream, None).ok()?;
 
-        println!("connected to service: '{}'", identity.service.id());
+        log::info!("connected to service: '{}'", identity.service.id());
         Some(Box::new(Connection::<Req, Resp, Error> {
             id: comm_settings.connection_id,
             port: comm_settings.port,
@@ -90,7 +90,7 @@ impl<Req, Resp, Error> Connection<Req, Resp, Error>
 
     fn mgmt_transceive(addr: &SocketAddr, req: mgmt::Request) -> Option<mgmt::Response> {
         let mut stream = TcpStream::connect_timeout(addr, time::Duration::from_secs(2))
-            .map_err(|err| {println!("client::error::failed to open tcp port: {:?}", err); err})
+            .map_err(|err| {log::error!("failed to open tcp port: {:?}", err); err})
             .ok()?;
         let read_timeout = Some(time::Duration::from_secs(2));
         util::adjust_stream(&stream, read_timeout).ok()?;
@@ -104,7 +104,7 @@ impl<Req, Resp, Error> Connection<Req, Resp, Error>
 
         if protocol_version != self.server_protocol_version {
             compatiblity = false;
-            println!(
+            log::error!(
                 "incompatible ETM versions detected! client on v{} and server on v{}!",
                 protocol_version, self.server_protocol_version
             );
@@ -112,7 +112,7 @@ impl<Req, Resp, Error> Connection<Req, Resp, Error>
 
         if service.id() != self.server_service.id() {
             compatiblity = false;
-            println!(
+            log::error!(
                 "incompatible Services detected! client expects '{}' and server supplies '{}'!",
                 service.id(),
                 self.server_service.id()
@@ -121,7 +121,7 @@ impl<Req, Resp, Error> Connection<Req, Resp, Error>
 
         if service.protocol_version() != self.server_service.protocol_version() {
             compatiblity = false;
-            println!(
+            log::error!(
                 "incompatible ETM versions detected! client on v{} and server on v{}!",
                 service.protocol_version(),
                 self.server_service.protocol_version()
@@ -149,13 +149,13 @@ impl<Req, Resp, Error> Connection<Req, Resp, Error>
         };
 
         let transmission = serde.serialize(&transmission)
-            .map_err(|err| {println!("client::error serializing request: {:?}", err); err})
+            .map_err(|err| {log::error!("serializing request: {:?}", err); err})
             .ok()?;
 
         let response = Self::send_receive(stream, transmission).ok()?;
 
         let response = serde.deserialize::<transport::Transmission<Rsp>>(&response)
-            .map_err(|err| {println!("client::error deserializing response: {:?}", err); err})
+            .map_err(|err| {log::error!("deserializing response: {:?}", err); err})
             .ok()?;
 
         match response.r#type {
@@ -163,16 +163,16 @@ impl<Req, Resp, Error> Connection<Req, Resp, Error>
                 Some(response)
             },
             transport::Type::Error(err) => {
-                println!("error response: {:?}", err);
+                log::error!("response: {:?}", err);
                 None
             },
             unexpected @ _ => {
-                println!("error unexpected response: {:?}", unexpected);
+                log::error!("unexpected response: {:?}", unexpected);
                 None
             },
         }
         //TODO use map_or_else once feature is in stable rust
-        // response.map_or_else(|err| { println!("error deserializing response: {:?}", err); None }, |response| { Some(response.r#type) } )
+        // response.map_or_else(|err| { log::error!("deserializing response: {:?}", err); None }, |response| { Some(response.r#type) } )
     }
 
     fn send_receive(stream: &mut TcpStream, serialized: Vec<u8>) -> io::Result<Vec<u8>> {
@@ -188,9 +188,9 @@ impl<Req, Resp, Error> Drop for Connection<Req, Resp, Error>
         , Error: DeserializeOwned + std::fmt::Debug
 {
     fn drop(&mut self) {
-        println!("client::shutdown stream");
+        log::debug!("shutdown stream");
         if let Some(err) = self.stream.shutdown(Shutdown::Both).err() {
-            println!("client::error::shutdown stream: {:?}", err);
+            log::error!("shutdown stream: {:?}", err);
         }
     }
 }

@@ -17,7 +17,7 @@ pub fn bind(ip: Ipv4Addr, port: u16) -> Result<TcpListener, io::Error> {
         Ok(listener) => Ok(listener),
         Err(ref e) if e.raw_os_error() == Some(0x62) => {
             // port already in use
-            println!("server::bind port in use");
+            log::warn!("port in use");
             thread::sleep(port_in_use_sleep_milliseconds);
             bind(ip, port)
         }
@@ -30,21 +30,15 @@ pub fn listener_accept_nonblocking(listener: TcpListener) -> io::Result<TcpStrea
     for _ in 1..20 {
         match listener.accept() {
             Ok((stream, socket_address)) => {
-                println!(
-                    "server::transmission_handler::connection to address {}",
-                    socket_address
-                );
+                log::info!("connecting to address {}", socket_address);
                 return Ok(stream);
             }
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
-                println!("server::transmission_handler::waiting for connection");
+                log::debug!("waiting for connection");
                 thread::sleep(time::Duration::from_millis(100))
             }
             Err(err) => {
-                println!(
-                    "server::error::transmission_handler at waiting for connection::{:?}",
-                    err
-                );
+                log::error!("timeout at waiting for connection::{:?}", err);
                 return Err(err);
             }
         }
@@ -54,31 +48,31 @@ pub fn listener_accept_nonblocking(listener: TcpListener) -> io::Result<TcpStrea
         ErrorKind::TimedOut,
         "timeour while waiting for connection",
     ));
-    println!("server::error::{:?}", err);
+    log::error!("{:?}", err);
     err
 }
 
 pub fn adjust_stream(stream: &TcpStream, read_timeout: Option<time::Duration>) -> io::Result<()> {
     stream.set_read_timeout(read_timeout)
-        .map_err(|err| {println!("util::error::failed to set read timeout on tcp stream: {:?}", err); err})?;
+        .map_err(|err| {log::error!("failed to set read timeout on tcp stream: {:?}", err); err})?;
     stream.set_nodelay(true)
-        .map_err(|err| {println!("util::error::failed to set nodelay on tcp stream: {:?}", err); err})?;
+        .map_err(|err| {log::error!("failed to set nodelay on tcp stream: {:?}", err); err})?;
     stream.set_nonblocking(false)
-        .map_err(|err| {println!("util::error::failed to set blocking read on tcp stream: {:?}", err); err})?;
+        .map_err(|err| {log::error!("failed to set blocking read on tcp stream: {:?}", err); err})?;
     Ok(())
 }
 
 pub fn wait_for_transmission(stream: &mut TcpStream) -> io::Result<u64> {
     let mut datalengthbuffer = [0u8; 8];
     stream.read_exact(&mut datalengthbuffer[..])
-        .map_err(|err| {println!("error waiting for transmission: {:?}", err); err})?;
+        .map_err(|err| {log::error!("waiting for transmission: {:?}", err); err})?;
     Ok(u64::from_be_bytes(datalengthbuffer))
 }
 
 pub fn read_transmission(stream: &mut TcpStream, payload_size: u64) -> io::Result<Vec<u8>> {
     let mut databuffer = Vec::<u8>::new();
     stream.take(payload_size).read_to_end(&mut databuffer)
-        .map_err(|err| {println!("error reading transmission: {:?}", err); err})?;
+        .map_err(|err| {log::error!("waiting for reading transmission: {:?}", err); err})?;
     Ok(databuffer)
 }
 
@@ -86,5 +80,5 @@ pub fn write_transmission(stream: &mut TcpStream, serialized: Vec<u8>) -> io::Re
     let mut senddata = (serialized.len() as u64).to_be_bytes().to_vec();
     senddata.extend(serialized);
 
-    stream.write(&senddata).map_err(|err| {println!("error writing transmission: {:?}", err); err})
+    stream.write(&senddata).map_err(|err| {log::error!("writing transmission: {:?}", err); err})
 }

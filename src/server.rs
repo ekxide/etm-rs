@@ -29,7 +29,7 @@ pub trait MessageProcessing : Send + Sync {
 
     fn setup(&self, connection_info: String, connection_id: u32) {
         // default implementation das nothing
-        println!(
+        log::trace!(
             "default implementation for MessageProcessing::setup: {} : {}",
             connection_info, connection_id
         );
@@ -39,7 +39,7 @@ pub trait MessageProcessing : Send + Sync {
 
     fn cleanup(&self, connection_info: String, connection_id: u32) {
         // default implementation das nothing
-        println!(
+        log::trace!(
             "default implementation for MessageProcessing::cleanup: {} : {}",
             connection_info, connection_id
         );
@@ -91,7 +91,7 @@ impl<Req, Resp, Error, T> Server<T>
     }
 
     pub fn run(&self) -> io::Result<()> {
-        println!("server::run");
+        log::info!("run");
 
         let ip = Ipv4Addr::UNSPECIFIED;
 
@@ -104,13 +104,13 @@ impl<Req, Resp, Error, T> Server<T>
             match stream {
                 Ok(stream) => {
                     if let Err(e) = self.handle_mgmt_request(stream, serde.big_endian()) {
-                        println!("server::run -> mgmt request error: {:?}", e);
+                        log::error!("mgmt request: {:?}", e);
                     }
                 },
-                Err(e) => println!("server::run -> error: {:?}", e),
+                Err(e) => log::error!("run: {:?}", e),
             }
         }
-        println!("server::run -> stop");
+        log::info!("run -> stop");
         Ok(())
     }
 
@@ -155,7 +155,7 @@ impl<Req, Resp, Error, T> Server<T>
         while running {
             if let Err(e) = Self::handle_request(stream, serde, &*message_processing, connection_id)
             {
-                println!("server::transmission error: {:?}", e);
+                log::error!("transmission error: {:?}", e);
                 running = false;
             };
         }
@@ -165,7 +165,7 @@ impl<Req, Resp, Error, T> Server<T>
             connection_id,
         );
 
-        println!("server::end transceiver");
+        log::debug!("end message processing transceiver");
         Ok(())
     }
 
@@ -232,10 +232,10 @@ impl<Req, Resp, Error, T> Executor for Server<T>
     fn execute(&self, _connection_id: u32, rpc: Self::Rq) -> Result<Self::Rsp, Self::E> {
         match rpc {
             mgmt::Request::Identify{protocol_version} => {
-                println!("server::identify request");
+                log::debug!("server::identify request");
                 let server_protocol_version = ProtocolVersion::entity().version();
                 if server_protocol_version != protocol_version {
-                    println!("server::identify -> incompatible protocol versions; server: {}, client: {}", server_protocol_version, protocol_version);
+                    log::warn!("server::identify -> incompatible protocol versions; server: {}, client: {}", server_protocol_version, protocol_version);
                 }
                 Ok(mgmt::Response::Identify(mgmt::Identity {
                     protocol_version: server_protocol_version,
@@ -243,7 +243,7 @@ impl<Req, Resp, Error, T> Executor for Server<T>
                 }))
             },
             mgmt::Request::Connect(params) => {
-                println!("server::connection request");
+                log::debug!("server::connection request");
                 let port = self.connection_request(params.connection_id).unwrap();
                 Ok(mgmt::Response::Connect(mgmt::CommSettings {
                     connection_id: params.connection_id,
