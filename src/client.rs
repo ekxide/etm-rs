@@ -188,7 +188,22 @@ impl<Req, Resp, Error> Drop for Connection<Req, Resp, Error>
         , Error: DeserializeOwned + std::fmt::Debug
 {
     fn drop(&mut self) {
-        log::debug!("shutdown stream");
+        log::info!("shutdown stream");
+
+        let mut serde = bincode::config();
+        let serde = serde.big_endian();
+
+        let transmission = transport::Transmission::<()> {
+            id: 42,
+            r#type: transport::Type::End,
+        };
+
+        let transmission = serde.serialize(&transmission)
+            .map_err(|err| {log::error!("serializing request: {:?}", err); err})
+            .unwrap();
+
+        util::write_transmission(&mut self.stream, transmission).unwrap();
+
         if let Some(err) = self.stream.shutdown(Shutdown::Both).err() {
             log::error!("shutdown stream: {:?}", err);
         }
