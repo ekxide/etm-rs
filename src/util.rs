@@ -153,14 +153,11 @@ pub fn wait_for_transmission(stream: &mut TcpStream) -> io::Result<u64> {
 }
 
 pub fn read_transmission(stream: &mut TcpStream, payload_size: u64) -> io::Result<Vec<u8>> {
-    let mut databuffer = Vec::<u8>::new();
-    stream
-        .take(payload_size)
-        .read_to_end(&mut databuffer)
-        .map_err(|err| {
-            log::error!("waiting for reading transmission: {:?}", err);
-            err
-        })?;
+    let mut databuffer = vec![0u8; payload_size as usize];
+    stream.read_exact(&mut databuffer[..]).map_err(|err| {
+        log::error!("waiting for transmission: {:?}", err);
+        err
+    })?;
     Ok(databuffer)
 }
 
@@ -307,10 +304,215 @@ mod tests {
 
             if let Ok(mut tcp_stream) = tcp_stream {
                 assert!(adjust_stream(&tcp_stream, Some(Duration::from_millis(200))).is_ok());
+                match tcp_stream.nodelay() {
+                    Ok(true) => (),
+                    _ => assert!(false),
+                }
                 let mut buffer = [0u8; 1];
                 ready.store(true, Ordering::Relaxed);
                 assert!(tcp_stream.read_exact(&mut buffer[..]).is_ok());
             }
+
+            assert!(th.join().is_ok());
+        }
+    }
+
+    #[test]
+    fn wait_for_transmission_success() {
+        let ip = Ipv4Addr::UNSPECIFIED;
+        let port = TEST_PORT_BASE.fetch_add(1, Ordering::Relaxed);
+        let listener = bind(ip, port);
+        assert!(listener.is_ok());
+
+        const DATA_LENGTH: u64 = 42;
+        let send_data = u64::to_be_bytes(DATA_LENGTH);
+
+        if let Ok(listener) = listener {
+            let th = thread::spawn(move || {
+                let addr = SocketAddr::from((ip, port));
+                assert!(
+                    TcpStream::connect_timeout(&addr, Duration::from_millis(100))
+                        .map(|mut writer| writer.write(&send_data))
+                        .is_ok()
+                );
+            });
+
+            assert!(
+                listener_accept_nonblocking(listener, Duration::from_millis(100))
+                    .and_then(|mut reader| adjust_stream(
+                        &mut reader,
+                        Some(Duration::from_millis(100))
+                    )
+                    .and_then(|_| Ok(reader)))
+                    .and_then(|mut reader| wait_for_transmission(&mut reader))
+                    .map(|data_length| {
+                        assert_eq!(data_length, DATA_LENGTH);
+                        Result::<(), ()>::Ok(())
+                    })
+                    .is_ok()
+            );
+
+            assert!(th.join().is_ok());
+        }
+    }
+
+    #[test]
+    fn wait_for_transmission_failure() {
+        let ip = Ipv4Addr::UNSPECIFIED;
+        let port = TEST_PORT_BASE.fetch_add(1, Ordering::Relaxed);
+        let listener = bind(ip, port);
+        assert!(listener.is_ok());
+
+        const DATA_LENGTH: u32 = 42;
+        let send_data = u32::to_be_bytes(DATA_LENGTH);
+
+        if let Ok(listener) = listener {
+            let th = thread::spawn(move || {
+                let addr = SocketAddr::from((ip, port));
+                assert!(
+                    TcpStream::connect_timeout(&addr, Duration::from_millis(100))
+                        .map(|mut writer| writer.write(&send_data))
+                        .is_ok()
+                );
+            });
+
+            assert!(
+                listener_accept_nonblocking(listener, Duration::from_millis(100))
+                    .and_then(|mut reader| adjust_stream(
+                        &mut reader,
+                        Some(Duration::from_millis(100))
+                    )
+                    .and_then(|_| Ok(reader)))
+                    .and_then(|mut reader| wait_for_transmission(&mut reader))
+                    .is_err()
+            );
+
+            assert!(th.join().is_ok());
+        }
+    }
+
+    #[test]
+    fn read_transmission_success() {
+        let ip = Ipv4Addr::UNSPECIFIED;
+        let port = TEST_PORT_BASE.fetch_add(1, Ordering::Relaxed);
+        let listener = bind(ip, port);
+        assert!(listener.is_ok());
+
+        const DATA_LENGTH: u64 = 8;
+        const SEND_DATA: u64 = 73;
+        let send_data = u64::to_be_bytes(SEND_DATA);
+
+        if let Ok(listener) = listener {
+            let th = thread::spawn(move || {
+                let addr = SocketAddr::from((ip, port));
+                assert!(
+                    TcpStream::connect_timeout(&addr, Duration::from_millis(100))
+                        .map(|mut writer| writer.write(&send_data))
+                        .is_ok()
+                );
+            });
+
+            assert!(
+                listener_accept_nonblocking(listener, Duration::from_millis(100))
+                    .and_then(|mut reader| adjust_stream(
+                        &mut reader,
+                        Some(Duration::from_millis(100))
+                    )
+                    .and_then(|_| Ok(reader)))
+                    .and_then(|mut reader| read_transmission(&mut reader, DATA_LENGTH))
+                    .map(|payload| {
+                        assert_eq!(payload.len(), DATA_LENGTH as usize);
+                        assert_eq!(payload, send_data);
+                        Result::<(), ()>::Ok(())
+                    })
+                    .is_ok()
+            );
+
+            assert!(th.join().is_ok());
+        }
+    }
+
+    #[test]
+    fn read_transmission_failure() {
+        let ip = Ipv4Addr::UNSPECIFIED;
+        let port = TEST_PORT_BASE.fetch_add(1, Ordering::Relaxed);
+        let listener = bind(ip, port);
+        assert!(listener.is_ok());
+
+        const DATA_LENGTH: u64 = 13;
+        const SEND_DATA: u64 = 73;
+        let send_data = u64::to_be_bytes(SEND_DATA);
+
+        if let Ok(listener) = listener {
+            let th = thread::spawn(move || {
+                let addr = SocketAddr::from((ip, port));
+                assert!(
+                    TcpStream::connect_timeout(&addr, Duration::from_millis(100))
+                        .map(|mut writer| writer.write(&send_data))
+                        .is_ok()
+                );
+            });
+
+            assert!(
+                listener_accept_nonblocking(listener, Duration::from_millis(100))
+                    .and_then(|mut reader| adjust_stream(
+                        &mut reader,
+                        Some(Duration::from_millis(1000))
+                    )
+                    .and_then(|_| Ok(reader)))
+                    .and_then(|mut reader| { read_transmission(&mut reader, DATA_LENGTH) })
+                    .is_err()
+            );
+
+            assert!(th.join().is_ok());
+        }
+    }
+
+    #[test]
+    fn write_transmission_success() {
+        let ip = Ipv4Addr::UNSPECIFIED;
+        let port = TEST_PORT_BASE.fetch_add(1, Ordering::Relaxed);
+        let listener = bind(ip, port);
+        assert!(listener.is_ok());
+
+        const DATA_LENGTH: u64 = 8;
+        const SEND_DATA: u64 = 73;
+        let payload = u64::to_be_bytes(SEND_DATA);
+
+        let mut expected_data = Vec::<u8>::new();
+        expected_data.extend(u64::to_be_bytes(DATA_LENGTH).to_vec());
+        expected_data.extend(payload.to_vec());
+
+        if let Ok(listener) = listener {
+            let th = thread::spawn(move || {
+                let addr = SocketAddr::from((ip, port));
+                assert!(
+                    TcpStream::connect_timeout(&addr, Duration::from_millis(100))
+                        .and_then(|mut writer| adjust_stream(
+                            &mut writer,
+                            Some(Duration::from_millis(100))
+                        )
+                        .and_then(|_| Ok(writer)))
+                        .map(|mut writer| write_transmission(&mut writer, payload.to_vec()))
+                        .is_ok()
+                );
+            });
+
+            assert!(
+                listener_accept_nonblocking(listener, Duration::from_millis(100))
+                    .and_then(|mut reader| adjust_stream(
+                        &mut reader,
+                        Some(Duration::from_millis(100))
+                    )
+                    .and_then(|_| Ok(reader)))
+                    .and_then(|mut reader| {
+                        let mut databuffer = vec![0u8; expected_data.len()];
+                        reader
+                            .read_exact(&mut databuffer)
+                            .map(|_| assert_eq!(databuffer, expected_data))
+                    })
+                    .is_ok()
+            );
 
             assert!(th.join().is_ok());
         }
