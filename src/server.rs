@@ -17,6 +17,7 @@ use std::io;
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 // TODO: use error_chain
 
@@ -152,7 +153,7 @@ where
         connection_id: u32,
     ) -> io::Result<()> {
         let local_port: u16 = listener.local_addr()?.port();
-        let stream = &mut util::listener_accept_nonblocking(listener)?;
+        let stream = &mut util::listener_accept_nonblocking(listener, Duration::from_secs(2))?;
         util::adjust_stream(stream, None)?;
 
         message_processing.setup(
