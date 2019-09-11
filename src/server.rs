@@ -3,7 +3,7 @@
  *
  * Unauthorized copying of this file, via any medium is strictly prohibited
  * Proprietary and confidential
- */
+*/
 
 use crate::mgmt;
 use crate::transport;
@@ -110,14 +110,12 @@ where
         let mut serde = bincode::config();
 
         for stream in listener.incoming() {
-            match stream {
-                Ok(stream) => {
-                    if let Err(e) = self.handle_mgmt_request(stream, serde.big_endian()) {
-                        log::error!("mgmt request: {:?}", e);
-                    }
-                }
-                Err(e) => log::error!("run: {:?}", e),
-            }
+            let _ = stream
+                .map_err(|err| log::error!("run: {:?}", err))
+                .and_then(|stream| {
+                    self.handle_mgmt_request(stream, serde.big_endian())
+                        .map_err(|err| log::error!("mgmt request: {:?}", err))
+                });
         }
         log::info!("run -> stop");
         Ok(())
@@ -167,10 +165,7 @@ where
         let mut running = TransceiveLoopAction::Continue;
         while running == TransceiveLoopAction::Continue {
             running = Self::handle_request(stream, serde, &*message_processing, connection_id)
-                .map_err(|err| {
-                    log::error!("transmission error: {:?}", err);
-                    err
-                })
+                .map_err(|err| log::error!("transmission error: {:?}", err))
                 .unwrap_or(TransceiveLoopAction::Stop);
         }
 
