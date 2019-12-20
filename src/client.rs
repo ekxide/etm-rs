@@ -17,6 +17,7 @@ use std::marker::PhantomData;
 use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpStream};
 use std::time;
 
+#[derive(Debug)]
 pub struct Connection<Req, Resp, Error>
     where Req: Serialize
         , Resp: DeserializeOwned + std::fmt::Debug
