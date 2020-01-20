@@ -1,9 +1,10 @@
-/*
- * Copyright (C) 2018 Mathias Kraus <k.hias@gmx.de> - All Rights Reserved
- *
- * Unauthorized copying of this file, via any medium is strictly prohibited
- * Proprietary and confidential
-*/
+// Copyright 2018 Mathias Kraus <k.hias@gmx.de> - All rights reserved
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
 
 use crate::mgmt;
 use crate::transport;
@@ -18,8 +19,6 @@ use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-
-// TODO: use error_chain
 
 pub trait MessageProcessing: Send + Sync {
     type Rq;
