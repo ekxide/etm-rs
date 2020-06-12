@@ -204,9 +204,11 @@ impl<Req, Resp, Error> Drop for Connection<Req, Resp, Error>
             .map_err(|err| {log::error!("serializing request: {:?}", err); err})
             .unwrap();
 
-        util::write_transmission(&mut self.stream, transmission).unwrap();
+        if let Err(err) = util::write_transmission(&mut self.stream, transmission) {
+            log::error!("sending transmission end: {:?}", err);
+        }
 
-        if let Some(err) = self.stream.shutdown(Shutdown::Both).err() {
+        if let Err(err) = self.stream.shutdown(Shutdown::Both) {
             log::error!("shutdown stream: {:?}", err);
         }
     }
