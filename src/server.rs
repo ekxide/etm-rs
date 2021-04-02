@@ -109,12 +109,9 @@ where
         let mut serde = bincode::config();
 
         for stream in listener.incoming() {
-            let _ = stream
-                .map_err(|err| log::error!("run: {:?}", err))
-                .and_then(|stream| {
-                    self.handle_mgmt_request(stream, serde.big_endian())
-                        .map_err(|err| log::error!("mgmt request: {:?}", err))
-                });
+            let _ =
+                || -> io::Result<()> { self.handle_mgmt_request(stream?, serde.big_endian()) }()
+                    .map_err(|err| log::error!("mgmt request: {:?}", err));
         }
         log::info!("run -> stop");
         Ok(())
@@ -182,7 +179,7 @@ where
         serde: &mut bincode::Config,
         executor: &U,
         connection_id: u32,
-    ) -> io::Result<(TransceiveLoopAction)>
+    ) -> io::Result<TransceiveLoopAction>
     where
         Rq: DeserializeOwned,
         Rsp: Serialize,
@@ -273,5 +270,95 @@ where
                 }))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use serde::{Deserialize, Serialize};
+    use std::net::SocketAddr;
+    use std::sync::atomic::{AtomicU16, Ordering};
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct Dummy {}
+
+    #[derive(Serialize, Deserialize, Debug)]
+    enum DummyRequest {
+        Ping,
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    enum DummyResponse {
+        Pong,
+    }
+
+    impl MessageProcessing for Dummy {
+        type Rq = DummyRequest;
+        type Rsp = DummyResponse;
+        type E = String;
+
+        fn new() -> Arc<Self> {
+            Arc::new(Dummy {})
+        }
+
+        fn execute(&self, _connection_id: u32, _rpc: Self::Rq) -> Result<Self::Rsp, Self::E> {
+            Ok(DummyResponse::Pong)
+        }
+    }
+
+    static TEST_PORT_BASE: AtomicU16 = AtomicU16::new(6000);
+
+    #[test]
+    fn identify_request() -> io::Result<()> {
+        let ip = Ipv4Addr::UNSPECIFIED;
+        let port = TEST_PORT_BASE.fetch_add(1, Ordering::Relaxed);
+        let listener = util::bind(ip, port)?;
+
+        let th = thread::spawn(move || {
+            let mut serde = bincode::config();
+            let serde = serde.big_endian();
+
+            const EXPECTED_ETM_PROTOCOL_VERSION: u32 = 0;
+            let identify = transport::Transmission {
+                id: 0,
+                r#type: transport::Type::Request(mgmt::Request::Identify {
+                    protocol_version: EXPECTED_ETM_PROTOCOL_VERSION,
+                }),
+            };
+            let identify = serde.serialize(&identify).unwrap();
+
+            let addr = SocketAddr::from((ip, port));
+            if let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(100)) {
+                util::adjust_stream(&mut stream, Some(Duration::from_millis(100)))?;
+                util::write_transmission(&mut stream, identify)?;
+                let payload_length = util::wait_for_transmission(&mut stream)?;
+                let response = util::read_transmission(&mut stream, payload_length)?;
+                let identity = serde
+                    .deserialize::<transport::Transmission<mgmt::Response>>(&response)
+                    .unwrap();
+                match identity.r#type {
+                    transport::Type::Response(mgmt::Response::Identify(identity)) => {
+                        assert!(identity.protocol_version == 0)
+                    }
+                    _ => assert!(false),
+                }
+            }
+
+            Ok::<(), io::Error>(())
+        });
+
+        let stream = util::listener_accept_nonblocking(listener, Duration::from_millis(100))?;
+
+        let service = Service::entity("TestService".to_string(), 1);
+        let server = Server::<Dummy>::new(port, service);
+
+        let mut serde = bincode::config();
+        let serde = serde.big_endian();
+        server.handle_mgmt_request(stream, serde)?;
+
+        assert!(th.join().is_ok());
+        Ok(())
     }
 }
