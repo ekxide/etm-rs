@@ -21,6 +21,7 @@ pub struct Transmission<T> {
 mod tests {
     use super::*;
 
+    use bincode::Options;
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, PartialEq, Debug)]
@@ -32,8 +33,9 @@ mod tests {
 
     #[test]
     fn error_transmission() {
-        let mut serde = bincode::config();
-        let serde = serde.big_endian();
+        let serde = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
 
         let transmission = Transmission::<TestType> {
             id: 0x42,
@@ -56,8 +58,9 @@ mod tests {
 
     #[test]
     fn end_transmission() {
-        let mut serde = bincode::config();
-        let serde = serde.big_endian();
+        let serde = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
 
         let transmission = Transmission::<TestType> {
             id: 0x42,
@@ -79,8 +82,9 @@ mod tests {
 
     #[test]
     fn request_transmission() {
-        let mut serde = bincode::config();
-        let serde = serde.big_endian();
+        let serde = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
 
         let transmission = Transmission::<TestType> {
             id: 0x42,
@@ -103,8 +107,9 @@ mod tests {
 
     #[test]
     fn response_transmission() {
-        let mut serde = bincode::config();
-        let serde = serde.big_endian();
+        let serde = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
 
         let transmission = Transmission::<TestType> {
             id: 0x42,
@@ -127,8 +132,9 @@ mod tests {
 
     #[test]
     fn stream_transmission() {
-        let mut serde = bincode::config();
-        let serde = serde.big_endian();
+        let serde = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
 
         let transmission = Transmission::<TestType> {
             id: 0x42,
@@ -151,8 +157,9 @@ mod tests {
 
     #[test]
     fn transmission_type_string() {
-        let mut serde = bincode::config();
-        let serde = serde.big_endian();
+        let serde = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
 
         let transmission = Transmission::<TestType> {
             id: 0x42,
@@ -175,8 +182,9 @@ mod tests {
 
     #[test]
     fn transmission_type_vec() {
-        let mut serde = bincode::config();
-        let serde = serde.big_endian();
+        let serde = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
 
         let transmission = Transmission::<TestType> {
             id: 0x42,

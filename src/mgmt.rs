@@ -23,7 +23,7 @@ pub struct CommSettings {
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub enum Request {
-    Identify{protocol_version: u32},
+    Identify { protocol_version: u32 },
     Connect(CommParams),
 }
 

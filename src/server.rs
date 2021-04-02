@@ -3,6 +3,7 @@ use crate::transport;
 use crate::util;
 use crate::{ProtocolVersion, Service};
 
+use bincode::Options;
 use serde::{de::DeserializeOwned, Serialize};
 
 use std::convert::TryFrom;
@@ -11,6 +12,11 @@ use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+
+type BincodeSerde = bincode::config::WithOtherIntEncoding<
+    bincode::config::WithOtherEndian<bincode::DefaultOptions, bincode::config::BigEndian>,
+    bincode::config::FixintEncoding,
+>;
 
 pub trait MessageProcessing: Send + Sync {
     type Rq;
@@ -98,12 +104,13 @@ where
         // bind port
         let listener = util::bind(ip, self.port)?;
 
-        let mut serde = bincode::config();
+        let serde = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
 
         for stream in listener.incoming() {
-            let _ =
-                || -> io::Result<()> { self.handle_mgmt_request(stream?, serde.big_endian()) }()
-                    .map_err(|err| log::error!("mgmt request: {:?}", err));
+            let _ = || -> io::Result<()> { self.handle_mgmt_request(stream?, &serde) }()
+                .map_err(|err| log::error!("mgmt request: {:?}", err));
         }
         log::info!("run -> stop");
         Ok(())
@@ -112,7 +119,7 @@ where
     fn handle_mgmt_request(
         &self,
         mut stream: TcpStream,
-        serde: &mut bincode::Config,
+        serde: &BincodeSerde, // &dyn bincode::Options,
     ) -> io::Result<()> {
         util::adjust_stream(&stream, None)?;
 
@@ -147,12 +154,13 @@ where
             connection_id,
         );
 
-        let mut serde = bincode::config();
-        let serde = serde.big_endian();
+        let serde = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
 
         let mut running = TransceiveLoopAction::Continue;
         while running == TransceiveLoopAction::Continue {
-            running = Self::handle_request(stream, serde, &*message_processing, connection_id)
+            running = Self::handle_request(stream, &serde, &*message_processing, connection_id)
                 .map_err(|err| log::error!("transmission error: {:?}", err))
                 .unwrap_or(TransceiveLoopAction::Stop);
         }
@@ -168,7 +176,7 @@ where
 
     fn handle_request<Rq, Rsp, E, U>(
         stream: &mut TcpStream,
-        serde: &mut bincode::Config,
+        serde: &BincodeSerde, // &dyn bincode::config::Options,
         executor: &U,
         connection_id: u32,
     ) -> io::Result<TransceiveLoopAction>
@@ -309,8 +317,9 @@ mod tests {
         let listener = util::bind(ip, port)?;
 
         let th = thread::spawn(move || {
-            let mut serde = bincode::config();
-            let serde = serde.big_endian();
+            let serde = bincode::DefaultOptions::new()
+                .with_big_endian()
+                .with_fixint_encoding();
 
             const EXPECTED_ETM_PROTOCOL_VERSION: u32 = 0;
             let identify = transport::Transmission {
@@ -346,9 +355,10 @@ mod tests {
         let service = Service::entity("TestService".to_string(), 1);
         let server = Server::<Dummy>::new(port, service);
 
-        let mut serde = bincode::config();
-        let serde = serde.big_endian();
-        server.handle_mgmt_request(stream, serde)?;
+        let serde = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
+        server.handle_mgmt_request(stream, &serde)?;
 
         assert!(th.join().is_ok());
         Ok(())

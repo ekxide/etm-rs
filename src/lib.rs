@@ -15,9 +15,7 @@ pub struct ProtocolVersion {
 
 impl ProtocolVersion {
     pub fn entity() -> Self {
-        ProtocolVersion {
-            version: 0,
-        }
+        ProtocolVersion { version: 0 }
     }
 
     pub fn version(&self) -> u32 {
