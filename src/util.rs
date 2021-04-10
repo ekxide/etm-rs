@@ -167,13 +167,12 @@ pub fn write_transmission(stream: &mut TcpStream, serialized: Vec<u8>) -> io::Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_common::TEST_PORT_BASE;
 
     use std::net::SocketAddr;
-    use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread;
     use std::time::{Duration, SystemTime};
-
-    static TEST_PORT_BASE: AtomicU16 = AtomicU16::new(5000);
 
     #[test]
     fn interruptable_sleep_finish() {

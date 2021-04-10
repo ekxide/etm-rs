@@ -26,7 +26,7 @@ pub trait MessageProcessing: Send + Sync {
     fn new() -> Arc<Self>;
 
     fn setup(&self, connection_info: String, connection_id: u32) {
-        // default implementation das nothing
+        // default implementation does nothing
         log::trace!(
             "default implementation for MessageProcessing::setup: {} : {}",
             connection_info,
@@ -37,12 +37,19 @@ pub trait MessageProcessing: Send + Sync {
     fn execute(&self, connection_id: u32, rpc: Self::Rq) -> Result<Self::Rsp, Self::E>;
 
     fn cleanup(&self, connection_info: String, connection_id: u32) {
-        // default implementation das nothing
+        // default implementation does nothing
         log::trace!(
             "default implementation for MessageProcessing::cleanup: {} : {}",
             connection_info,
             connection_id
         );
+    }
+
+    // this can be implemented to shutdow a server; to accomplish this, this function must return true when a mgmt::Request::CheckRunState is send
+    fn shutdown(&self) -> bool {
+        // default implementation does nothing
+        log::trace!("default implementation for MessageProcessing::shutdow");
+        false
     }
 
     // TODO
@@ -69,10 +76,10 @@ impl<T: 'static + MessageProcessing> Executor for T {
 }
 
 pub struct Server<T: 'static + MessageProcessing> {
-    message_processing: Arc<T>,
+    pub(crate) message_processing: Arc<T>,
     port: u16,
     service: Service,
-    //TODO store connection id in hash map with all assosiated thread join handles
+    //TODO store connection id in hash map with all associated thread join handles
 }
 
 #[derive(PartialEq)]
@@ -111,6 +118,9 @@ where
         for stream in listener.incoming() {
             let _ = || -> io::Result<()> { self.handle_mgmt_request(stream?, &serde) }()
                 .map_err(|err| log::error!("mgmt request: {:?}", err));
+            if self.message_processing.shutdown() {
+                break;
+            }
         }
         log::info!("run -> stop");
         Ok(())
@@ -251,7 +261,7 @@ where
     fn execute(&self, _connection_id: u32, rpc: Self::Rq) -> Result<Self::Rsp, Self::E> {
         match rpc {
             mgmt::Request::Identify { protocol_version } => {
-                log::debug!("server::identify request");
+                log::debug!("server::Identify request");
                 let server_protocol_version = ProtocolVersion::entity().version();
                 if server_protocol_version != protocol_version {
                     log::warn!("server::identify -> incompatible protocol versions; server: {}, client: {}", server_protocol_version, protocol_version);
@@ -262,12 +272,16 @@ where
                 }))
             }
             mgmt::Request::Connect(params) => {
-                log::debug!("server::connection request");
+                log::debug!("server::Connect request");
                 let port = self.connection_request(params.connection_id).unwrap();
                 Ok(mgmt::Response::Connect(mgmt::CommSettings {
                     connection_id: params.connection_id,
                     port,
                 }))
+            }
+            mgmt::Request::CheckRunState => {
+                log::debug!("server::CheckRunState request");
+                Ok(mgmt::Response::CheckRunState)
             }
         }
     }
@@ -276,13 +290,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_common::TEST_PORT_BASE;
 
     use serde::{Deserialize, Serialize};
     use std::net::SocketAddr;
-    use std::sync::atomic::{AtomicU16, Ordering};
+    use std::sync::atomic::Ordering;
 
     #[derive(Serialize, Deserialize, Debug)]
-    struct Dummy {}
+    struct DummyServer {}
 
     #[derive(Serialize, Deserialize, Debug)]
     enum DummyRequest {
@@ -294,21 +309,19 @@ mod tests {
         Pong,
     }
 
-    impl MessageProcessing for Dummy {
+    impl MessageProcessing for DummyServer {
         type Rq = DummyRequest;
         type Rsp = DummyResponse;
         type E = String;
 
         fn new() -> Arc<Self> {
-            Arc::new(Dummy {})
+            Arc::new(DummyServer {})
         }
 
         fn execute(&self, _connection_id: u32, _rpc: Self::Rq) -> Result<Self::Rsp, Self::E> {
             Ok(DummyResponse::Pong)
         }
     }
-
-    static TEST_PORT_BASE: AtomicU16 = AtomicU16::new(6000);
 
     #[test]
     fn identify_request() -> io::Result<()> {
@@ -353,7 +366,7 @@ mod tests {
         let stream = util::listener_accept_nonblocking(listener, Duration::from_millis(100))?;
 
         let service = Service::entity("TestService".to_string(), 1);
-        let server = Server::<Dummy>::new(port, service);
+        let server = Server::<DummyServer>::new(port, service);
 
         let serde = bincode::DefaultOptions::new()
             .with_big_endian()

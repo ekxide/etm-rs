@@ -89,7 +89,7 @@ where
         }))
     }
 
-    fn mgmt_transceive(addr: &SocketAddr, req: mgmt::Request) -> Option<mgmt::Response> {
+    pub(crate) fn mgmt_transceive(addr: &SocketAddr, req: mgmt::Request) -> Option<mgmt::Response> {
         let mut stream = TcpStream::connect_timeout(addr, time::Duration::from_secs(2))
             .map_err(|err| {
                 log::error!("failed to open tcp port: {:?}", err);

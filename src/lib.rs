@@ -5,6 +5,9 @@ pub mod transport;
 mod mgmt;
 mod util;
 
+#[cfg(test)]
+mod test;
+
 use serde::{Deserialize, Serialize};
 
 pub use util::listener_accept_nonblocking;
@@ -44,4 +47,11 @@ impl Service {
     pub fn protocol_version(&self) -> u32 {
         self.protocol_version
     }
+}
+
+#[cfg(test)]
+mod test_common {
+    use std::sync::atomic::AtomicU16;
+
+    pub(crate) static TEST_PORT_BASE: AtomicU16 = AtomicU16::new(5000);
 }

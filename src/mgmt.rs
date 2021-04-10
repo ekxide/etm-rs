@@ -25,10 +25,12 @@ pub struct CommSettings {
 pub enum Request {
     Identify { protocol_version: u32 },
     Connect(CommParams),
+    CheckRunState,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub enum Response {
     Identify(Identity),
     Connect(CommSettings),
+    CheckRunState,
 }
