@@ -2,7 +2,7 @@
 name = "etm"
 description = "easy tcp messaging"
 version = "0.14.2"
-authors = ["Mathias »Bob« Kraus <k.hias@gmx.de>"]
+authors = ["Mathias »Bob« Kraus <elboberido@m-hias.de>"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
 
